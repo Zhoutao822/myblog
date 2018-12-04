@@ -2,12 +2,12 @@
 title: Mac+Anaconda+PyCharm/VSCode环境搭建
 date: 2018-10-13 10:44:00
 categories:
-- tips
+- Tips
 tags:
-- anaconda
-- pycharm
-- python
-- vscode
+- Anaconda
+- PyCharm
+- Python
+- VSCode
 mathjax: true
 ---
 
