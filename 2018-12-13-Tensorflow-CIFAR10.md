@@ -1,5 +1,5 @@
 ---
-title: Tensorflow-CIFAR10
+title: TensorFlow-CIFAR10
 date: 2018-12-13 17:54:58
 categories:
 - Coding
