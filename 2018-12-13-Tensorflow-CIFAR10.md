@@ -106,7 +106,7 @@ def convert_to_tfrecord(input_files, output_file):
         # 写入地内容是tf.train.Example类型，对应上面地key-value形式
         example = tf.train.Example(features=tf.train.Features(
             feature={
-                'image': _bytes_feature(data[i].tobytes()), # tobytes类型转换
+                'image': _bytes_feature(data[i].tobytes()), # tobytes与tostring最终结果相同
                 'label': _int64_feature(labels[i])
             }))
         # SerializeToString序列化，必须步骤
@@ -262,9 +262,9 @@ class Cifar10DataSet(object):
   @staticmethod
   def num_examples_per_epoch(subset='train'):
     if subset == 'train':
-      return 45000
+      return 45000 # 这里可能写错了？40000
     elif subset == 'validation':
-      return 5000
+      return 5000 # 这里可能写错了？10000
     elif subset == 'eval':
       return 10000
     else:
