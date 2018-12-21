@@ -15,7 +15,7 @@ mathjax: true
 > [Keras Applications](https://github.com/keras-team/keras-applications)
 > [Models for image classification with weights trained on ImageNet](https://keras.io/applications/#xception)
 > [深度学习VGG模型核心拆解](https://blog.csdn.net/qq_40027052/article/details/79015827)
-
+> [Deep Learning Papers Translation(CV)](https://github.com/SnailTyan/deep-learning-papers-translation)
 
 ImageNet项目是一个用于视觉对象识别软件研究的大型可视化数据库。超过1400万的图像URL被ImageNet手动注释，以指示图片中的对象；在至少一百万个图像中，还提供了边界框。ImageNet包含2万多个类别；一个典型的类别，如“气球”或“草莓”，包含数百个图像。第三方图像URL的注释数据库可以直接从ImageNet免费获得；但是，实际的图像不属于ImageNet。自2010年以来，ImageNet项目每年举办一次软件比赛，即ImageNet大规模视觉识别挑战赛（ILSVRC），软件程序竞相正确分类检测物体和场景。
 
@@ -45,10 +45,34 @@ VGG模型Tricks：
 6. rescale的大小$S$一般为256或384，预训练时为256；或者动态限制在$[256, 512]$之间，预训练时为384；
 7. 测试时rescale大小为$Q$，$Q$可以取$S$中的一个值；测试阶段把网络中原本的三个全连接层依次变为1个conv7x7，2个conv1x1，也就是三个卷积层，测试重用训练时的参数，使得测试得到的全卷积网络因为没有全连接的限制，因而可以接收任意宽或高为的输入。
 
+VGG模型总结：
+
+* VGG本质上还是在CNN的基础上进行改动，没有脱离卷积网络的基础；
+* 由于采取了state-of-the-art，根据实验采取了很多小细节的操作。
+
 ## 2. ResNet50 & ResNet101 & ResNet152
 
 [Deep Residual Learning for Image Recognition](https://arxiv.org/abs/1512.03385)
 
+{% asset_img rest.png %}
+
+对于输入$\boldsymbol{x}$来说，映射$H(\boldsymbol{x})$是预测输出的最优解，但是实际上我们通过深度学习得到的映射并不一定是完美解，利用残差$F(\boldsymbol{x}) = H(\boldsymbol{x}) - \boldsymbol{x}$这种思想，使用$F(\boldsymbol{x}) + \boldsymbol{x}$作为期望的输出。我觉得采用残差类似于决策树中的残差概念，在ResNet网络中，对于输入到输出中不变的部分或维度，利用残差可以很好的保留这部分稀疏性，训练过程中变化的部分会产生梯度，这种前提是输入输出维度相同；对于输入与输出维度不同的时候，ResNet采取两种策略：补0和
+
+{% asset_img resnet.png %}
+
+ResNet模型结构：
+
+
+
+ResNet模型Tricks：
+
+
+
+ResNet模型总结：
+
+* 提出了利用残差优化网络的概念；
+* 根据实验说明了，利用残差的神经网络的深度可以很大；
+* 最后仅使用了一个全连接层。
 
 
 ## 3. ResNet50V2 & ResNet101V2 & ResNet152V2
