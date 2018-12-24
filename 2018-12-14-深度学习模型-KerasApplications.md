@@ -16,8 +16,12 @@ mathjax: true
 > [Models for image classification with weights trained on ImageNet](https://keras.io/applications/#xception)
 > [深度学习VGG模型核心拆解](https://blog.csdn.net/qq_40027052/article/details/79015827)
 > [Deep Learning Papers Translation(CV)](https://github.com/SnailTyan/deep-learning-papers-translation)
+> [ResNet论文翻译——中英文对照](https://blog.csdn.net/Quincuntial/article/details/77263607)
+> [An Overview of ResNet and its Variants](https://towardsdatascience.com/an-overview-of-resnet-and-its-variants-5281e2f56035)
 
 ImageNet项目是一个用于视觉对象识别软件研究的大型可视化数据库。超过1400万的图像URL被ImageNet手动注释，以指示图片中的对象；在至少一百万个图像中，还提供了边界框。ImageNet包含2万多个类别；一个典型的类别，如“气球”或“草莓”，包含数百个图像。第三方图像URL的注释数据库可以直接从ImageNet免费获得；但是，实际的图像不属于ImageNet。自2010年以来，ImageNet项目每年举办一次软件比赛，即ImageNet大规模视觉识别挑战赛（ILSVRC），软件程序竞相正确分类检测物体和场景。
+
+<!-- more -->
 
 ## 1. VGG16 & VGG19
 
@@ -56,17 +60,32 @@ VGG模型总结：
 
 {% asset_img rest.png %}
 
-对于输入$\boldsymbol{x}$来说，映射$H(\boldsymbol{x})$是预测输出的最优解，但是实际上我们通过深度学习得到的映射并不一定是完美解，利用残差$F(\boldsymbol{x}) = H(\boldsymbol{x}) - \boldsymbol{x}$这种思想，使用$F(\boldsymbol{x}) + \boldsymbol{x}$作为期望的输出。我觉得采用残差类似于决策树中的残差概念，在ResNet网络中，对于输入到输出中不变的部分或维度，利用残差可以很好的保留这部分稀疏性，训练过程中变化的部分会产生梯度，这种前提是输入输出维度相同；对于输入与输出维度不同的时候，ResNet采取两种策略：补0和
+$$
+\boldsymbol{y} = F(\boldsymbol{x}, \boldsymbol{W}_i) + \boldsymbol{x}
+$$
+
+对于输入$\boldsymbol{x}$来说，映射$H(\boldsymbol{x})$是预测输出的最优解，但是实际上我们通过深度学习得到的映射并不一定是完美解，利用残差$F(\boldsymbol{x}) = H(\boldsymbol{x}) - \boldsymbol{x}$这种思想，使用$F(\boldsymbol{x}) + \boldsymbol{x}$作为期望的输出。我觉得采用残差类似于决策树中的残差概念，在ResNet网络中，对于输入到输出中不变的部分或维度，利用残差可以很好的保留这部分稀疏性，训练过程中变化的部分会产生梯度，这种前提是输入输出维度相同；对于输入与输出维度不同的时候，ResNet采取两种策略：补0或使用线性映射$\boldsymbol{W}_s$匹配维度（由1 $\times$ 1卷积完成）。
 
 {% asset_img resnet.png %}
 
 ResNet模型结构：
 
-
+{% asset_img resnet0.png %}
 
 ResNet模型Tricks：
 
-
+1. 当输入和输出具有相同的维度时，可以直接使用恒等快捷连接；
+2. 当维度增加，考虑两个选项：快捷连接仍然执行恒等映射，额外填充零输入以增加维度；投影快捷连接用于匹配维度（由1 $\times$ 1卷积完成）。对于这两个选项，当快捷连接跨越两种尺寸的特征图时，它们执行时步长为2；
+3. 调整图像大小，其较短的边在$[256,480]$之间进行随机采样；
+4. 224 $\times$ 224裁剪是从图像或其水平翻转中随机采样，并逐像素减去均值；
+5. 在每个卷积之后和激活之前，我们采用批量归一化；
+6. 标准颜色增强；
+7. 批大小为256；
+8. 学习速度从0.1开始，当误差稳定时学习率除以10，并且模型训练高达$60 \times 10^4$次迭代。我们使用的权重衰减为0.0001，动量为0.9；
+9. 不使用丢弃；
+10. 在测试阶段，为了比较学习我们采用标准的10-crop测试；
+11. 采用如$[40, 12]$中的全卷积形式，并在多尺度上对分数进行平均（图像归一化，短边位于$\{224, 256, 384, 480, 640\}$中）；
+12. 更深的瓶颈结构，三层是1 $\times$ 1，3 $\times$ 3和1 $\times$ 1卷积，其中1 $\times$ 1层负责减小然后增加（恢复）维度，使3 $\times$ 3层成为具有较小输入/输出维度的瓶颈，两个设计具有相似的时间复杂度。
 
 ResNet模型总结：
 
@@ -79,13 +98,44 @@ ResNet模型总结：
 
 [Identity Mappings in Deep Residual Networks](https://arxiv.org/abs/1603.05027)
 
+ResNetV2在ResNet初代的基础上进行了更深一步的思考
 
+$$
+\boldsymbol{y}_l = h(\boldsymbol{x}_l) + F(\boldsymbol{x}_l, \boldsymbol{W}_l)
+\\
+\boldsymbol{x}_{l+1} = f(\boldsymbol{y}_l)
+$$
+
+$h$表示恒等映射，$F$是残差函数，$f$是ReLU
+
+与初代不同的是，V2考虑如果$f$也是恒等映射的情况下，网络的性能
+
+{% asset_img resnetv2-0.png %}
+
+对比了以上几种的$f$，实验结果表明恒等映射的训练误差最小
+
+{% asset_img resnetv2-1.png %}
+
+在此基础上，分析了BN after addition，ReLU before addition，pre-activation方法作为$f$，研究$f$对ResNet效果的影响，效果自然是最后一个full pre-activation最好。
+
+ResNetV2模型总结：
+
+* 在初代ResNet的基础上，通过实验进一步确定了恒等映射对残差网络性能有较好的提升；
+* 对于不同的$f$作为恒等映射对性能的影响做出了实验性的结论，并且制定了一套处理流程。
 
 ## 4. ResNeXt50 & ResNeXt101
 
 [Aggregated Residual Transformations for Deep Neural Networks](https://arxiv.org/abs/1611.05431)
 
+ ResNet的一种变体ResNeXt，它具备以下构建块：
 
+{% asset_img resnetxt.png %}
+
+作者在论文中引入了一个叫作「基数」（cardinality）的超参数，指独立路径的数量，这提供了一种调整模型容量的新思路。实验表明，通过扩大基数值（而不是深度或宽度），准确率得到了高效提升。作者表示，与 Inception 相比，这个全新的架构更容易适应新的数据集或任务，因为它只有一个简单的范式和一个需要调整的超参数，而 Inception 需要调整很多超参数（比如每个路径的卷积层内核大小）。
+
+ResNetXt模型总结：
+
+* ResNetXt与ResNetV2考虑的方向不同，主要考虑卷积层的变换，采取“分裂 - 变换 - 合并”的策略，增加了一个维度Group。
 
 ## 5. InceptionV3
 
