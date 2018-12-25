@@ -18,6 +18,10 @@ mathjax: true
 > [Deep Learning Papers Translation(CV)](https://github.com/SnailTyan/deep-learning-papers-translation)
 > [ResNet论文翻译——中英文对照](https://blog.csdn.net/Quincuntial/article/details/77263607)
 > [An Overview of ResNet and its Variants](https://towardsdatascience.com/an-overview-of-resnet-and-its-variants-5281e2f56035)
+> [深度学习---GoogLeNet](https://blog.csdn.net/qq_38906523/article/details/80061075)
+> [Inception-V4和Inception-Resnet论文阅读和代码解析](https://blog.csdn.net/stesha_chen/article/details/82115429)
+> [MobileNet 翻译及总结：用于移动视觉应用的高效卷积神经网络](https://blog.csdn.net/just_sort/article/details/79901885)
+
 
 ImageNet项目是一个用于视觉对象识别软件研究的大型可视化数据库。超过1400万的图像URL被ImageNet手动注释，以指示图片中的对象；在至少一百万个图像中，还提供了边界框。ImageNet包含2万多个类别；一个典型的类别，如“气球”或“草莓”，包含数百个图像。第三方图像URL的注释数据库可以直接从ImageNet免费获得；但是，实际的图像不属于ImageNet。自2010年以来，ImageNet项目每年举办一次软件比赛，即ImageNet大规模视觉识别挑战赛（ILSVRC），软件程序竞相正确分类检测物体和场景。
 
@@ -131,33 +135,229 @@ ResNetV2模型总结：
 
 {% asset_img resnetxt.png %}
 
-作者在论文中引入了一个叫作「基数」（cardinality）的超参数，指独立路径的数量，这提供了一种调整模型容量的新思路。实验表明，通过扩大基数值（而不是深度或宽度），准确率得到了高效提升。作者表示，与 Inception 相比，这个全新的架构更容易适应新的数据集或任务，因为它只有一个简单的范式和一个需要调整的超参数，而 Inception 需要调整很多超参数（比如每个路径的卷积层内核大小）。
+作者在论文中引入了一个叫作**基数**（cardinality）的超参数，指独立路径的数量，这提供了一种调整模型容量的新思路。实验表明，通过扩大基数值（而不是深度或宽度），准确率得到了高效提升。作者表示，与 Inception 相比，这个全新的架构更容易适应新的数据集或任务，因为它只有一个简单的范式和一个需要调整的超参数，而 Inception 需要调整很多超参数（比如每个路径的卷积层内核大小）。
 
 ResNetXt模型总结：
 
-* ResNetXt与ResNetV2考虑的方向不同，主要考虑卷积层的变换，采取“分裂 - 变换 - 合并”的策略，增加了一个维度Group。
+* ResNetXt与ResNetV2考虑的方向不同，主要考虑卷积层的变换，采取“分裂 - 变换 - 合并”的策略，增加了一个维度cardinality。
 
 ## 5. InceptionV3
 
 [Rethinking the Inception Architecture for Computer Vision](https://arxiv.org/abs/1512.00567)
 
+首先了解一下Inception结构，其目的是为了既能保持网络结构的稀疏性，又能利用密集矩阵的高计算性能
 
+{% asset_img inception0.png %}
+
+1. 采用不同大小的卷积核意味着不同大小的感受野，最后拼接意味着不同尺度特征的融合； 
+2. 之所以卷积核大小采用1、3和5，主要是为了方便对齐。设定卷积步长stride=1之后，只要分别设定pad=0、1、2，那么卷积之后便可以得到相同维度的特征，然后这些特征就可以直接拼接在一起了； 
+3. 文章说很多地方都表明pooling挺有效，所以Inception里面也嵌入了。 
+4. 网络越到后面，特征越抽象，而且每个特征所涉及的感受野也更大了，因此随着层数的增加，3x3和5x5卷积的比例也要增加。
+
+但是，使用5x5的卷积核仍然会带来巨大的计算量。 为此，文章借鉴NIN2，采用1x1卷积核来进行降维。 
+例如：上一层的输出为100x100x128，经过具有256个输出的5x5卷积层之后(stride=1，pad=2)，输出数据为100x100x256。其中，卷积层的参数为128x5x5x256。假如上一层输出先经过具有32个输出的1x1卷积层，再经过具有256个输出的5x5卷积层，那么最终的输出数据仍为为100x100x256，但卷积参数量已经减少为128x1x1x32 + 32x5x5x256，大约减少了4倍。
+
+{% asset_img inception1.png %}
+
+下面的准则来源于大量的实验，因此包含一定的推测，但实际证明基本都是有效的
+
+1. 避免表达瓶颈，特别是在网络靠前的地方。 信息流前向传播过程中显然不能经过高度压缩的层，即表达瓶颈。从input到output，feature map的宽和高基本都会逐渐变小，但是不能一下子就变得很小。比如你上来就来个kernel = 7, stride = 5 ,这样显然不合适。 另外输出的维度channel，一般来说会逐渐增多(每层的num_output)，否则网络会很难训练。（特征维度并不代表信息的多少，只是作为一种估计的手段）
+2. 高维特征更易处理。 高维特征更易区分，会加快训练。
+3. 可以在低维嵌入上进行空间汇聚而无需担心丢失很多信息。 比如在进行3x3卷积之前，可以对输入先进行降维而不会产生严重的后果。假设信息可以被简单压缩，那么训练就会加快。
+4. 平衡网络的宽度与深度。
+
+再到InceptionV2中，采用不对称卷积，n×1卷积核替代n×n卷积核，这种结构在前几层效果不太好，但对特征图大小为12~20的中间层效果明显。 
+
+并且引入了Batch normal层，使用3×3替换5×5卷积核
+
+{% asset_img inception2.png %}
+
+InceptionV3，一个最重要的改进是分解（Factorization），将7x7分解成两个一维的卷积（1x7,7x1），3x3也是一样（1x3,3x1），这样的好处，既可以加速计算（多余的计算能力可以用来加深网络），又可以将1个conv拆成2个conv，使得网络深度进一步增加，增加了网络的非线性，还有值得注意的地方是网络输入从224x224变为了299x299，更加精细设计了35x35/17x17/8x8的模块。
+
+{% asset_img inception4.png %}
+
+
+Inception模型总结：
+
+* 使用了集成方法的思想，将卷积行为变成并行的以增加不同维度特征间的联系；
+* 提出了不对称卷积的思路；
+* 引入了辅助分类器的概念，以改善非常深的网络的收敛，辅助分类器起着正则化项的作用；
+* 使用平行的步长为2的块来缩减特征图的网格大小，缩减网格尺寸的同时扩展滤波器组的Inception模块；
+* 通过标签平滑进行模型正则化。
+
+{% asset_img inception3.png %}
 
 ## 6. InceptionResNetV2
 
 [Inception-v4, Inception-ResNet and the Impact of Residual Connections on Learning](https://arxiv.org/abs/1602.07261)
 
+提到InceptionResNetV2就必须提到Inception-v4，作者首先使用纯Inception Block构建了Inception-v4模型，其结构为
 
+{% asset_img inceptionresnet6.png %}
+
+每个block的具体结构如下：（每个block中没有标记v的都表示same padding）
+
+**Stem**，InceptionResNetV2和Inception-v4共用
+
+{% asset_img inceptionresnet0.png %}
+
+**Inception-A**
+
+{% asset_img inceptionresnet1.png %}
+
+**Inception-B**
+
+{% asset_img inceptionresnet2.png %}
+
+**Inception-C**
+
+{% asset_img inceptionresnet3.png %}
+
+**35 to 17 ReductionA**，共用，但是具体filters个数根据不同模型而不同，参考表格
+
+{% asset_img inceptionresnet4.png %}
+
+{% asset_img inceptionresnet17.png %}
+
+**17 to 8 ReductionB**
+
+{% asset_img inceptionresnet5.png %}
+
+---
+
+接下来是InceptionResNetV1和InceptionResNetV2，V1和V2整体结构相同，细节的block有差异，InceptionResNetV2的Stem通用，InceptionResNetV1的Stem与其他不同
+
+{% asset_img inceptionresnet12.png %}
+
+**Stem**，仅限InceptionResNetV1
+
+{% asset_img inceptionresnet11.png %}
+
+**Inception-ResNet-v1 Inception-ResNet-A**
+
+{% asset_img inceptionresnet7.png %}
+
+**Inception-ResNet-v1 Inception-ResNet-B**
+
+{% asset_img inceptionresnet8.png %}
+
+**Inception-ResNet-v1 Inception-ResNet-C**
+
+{% asset_img inceptionresnet10.png %}
+
+**35 to 17 ReductionA**，共用，参考上面
+
+**17 to 8 ReductionB**，注意这里与V2的小区别，filters数量不同
+
+{% asset_img inceptionresnet9.png %}
+
+---
+
+**Inception-ResNet-v2 Inception-ResNet-A**
+
+{% asset_img inceptionresnet13.png %}
+
+**Inception-ResNet-v2 Inception-ResNet-B**
+
+{% asset_img inceptionresnet14.png %}
+
+**Inception-ResNet-v2 Inception-ResNet-C**
+
+{% asset_img inceptionresnet16.png %}
+
+**35 to 17 ReductionA**，共用，参考上面
+
+**17 to 8 ReductionB**，注意这里与V1的小区别，filters数量不同
+
+{% asset_img inceptionresnet15.png %}
+
+---
+
+最后，作者发现如果filter的个数超过1000个，残差网络会变得不稳定，网络会在训练的早期就“死掉”，也就意味着在几万次迭代之后，avg_pool之前的最后几层网络参数全是0。解决方案是要么减小learning rate，要么对这些层增加额外的batch normalization。
+
+作者又发现如果将残差部分缩放后再跟需要相加的层相加，会使网络在训练过程中更稳定。因此作者选择了一些缩放因子在0.1到0.3之间，用这个缩放因子去缩放残差网络，然后再做加法，如下图
+
+{% asset_img inceptionresnet18.png %}
+
+InceptionResNetV2模型总结：
+
+* 结合ResNet的思想，构建了Inception-ResNet模块，既优化了训练过程，又可以扩大特征间的联系；
+* 提出了缩小残差的思想。
 
 ## 7. Xception
 
 [Xception: Deep Learning with Depthwise Separable Convolutions](https://arxiv.org/abs/1610.02357)
 
+Xception从Inception进化而来，同时Xception是ResNeXt的一个变种
 
+串行式group的module，被起名 separable convolution 
+
+{% asset_img xception.png %}
+
+Xception模型结构：
+
+{% asset_img xception1.png %}
+
+实验结果，Xception在ImageNet上稍优于Inceptionv3，参数数量和Inceptionv3基本一致，速度也差不多。
+
+Xception模型总结：
+
+* 使用串行group替代Inception的并行group。
 
 ## 8. MobileNet(alpha=0.25/0.50/0.75/1.0)
 
 [MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications](https://arxiv.org/abs/1704.04861)
+
+MobileNet的提出很明显是为了部署在移动设备上，与ImageNet比赛相比，移动设备对内存、运算速度等方面要求很高，精度要求可以适当降低，而传统的ImageNet比赛中取胜的模型的参数基本已经达到一个很高的程度，所以使用MobileNet部署在移动设备上成为另一个目标。
+
+MobileNet引入了几个重要的技巧以降低运算量：
+
+### 8.1 Deep-wise Separabe 深度可分离卷积
+
+{% asset_img mobilenetv1-1.png %}
+
+传统卷积考虑到通道数，对于输入通道数为$N$，输出通道数为$M$，输入长宽$D_k$，输出长宽$D_F$，则卷积层的计算量为
+
+$$
+D_k \times D_k \times M \times N \times D_F \times D_F
+$$
+
+若采用深度可分离卷积，首先使用2D卷积核对所有通道进行处理，再使用3D1×1卷积核处理之前输出的特征图，最终得到的输出是与传统卷积是相同的
+
+计算量分为两部分
+
+$$
+D_k \times D_k \times M \times D_F \times D_F
+\\
+M \times N \times D_F \times D_F
+$$
+
+显然总计算量为上述两部分之和，那么与传统卷积计算量的比值为
+
+$$
+\frac{1}{N} + \frac{1}{D_k^2}
+$$
+
+MobileNet对3×3卷积进行这种改变使得计算量减少为原始的$\frac{1}{9}$，准确率仅下降一点。
+
+### 8.2 Network Structure and Training 网络结构和训练
+
+所有层之后都是BatchNormalization和ReLU非线性激活函数，但是最后的全连接层例外，它没有非线性激活函数，直接馈送到softmax层进行分类。
+
+{% asset_img mobilenetv1-2.png %}
+
+{% asset_img mobilenetv1.png %}
+
+与训练大模型相反，我们较少地使用正则化和数据增加技术，因为小模型不容易过拟合。当训练MobileNets时，我们不使用sideheads或者labelsmoothing，通过限制croping的尺寸来减少图片扭曲。另外，我们发现重要的是在depthwise滤波器上放置很少或没有重量衰减（L2正则化），因为它们参数很少
+
+### 8.3 Width Multiplier: Thinner Models(alpha参数：更小的模型)
+
+引入了一个非常简单的参数$\alpha$，称为width multiplier。这个参数widthmultiplier的作用是在每层均匀地减负网络。对于一个给定的层和widthmultiplierα，输入通道的数量从$M$变成$\alpha M$，输出通道的数量从$N$变成$\alpha N$。深度可分离卷积（以widthmultiplier参数$\alpha$为计）的计算复杂度： 
+$\alpha \in (0,1]$，通常设为1，0.75，0.5和0.25。$\alpha = 1$表示基准MobileNet，而$\alpha < 1$则表示瘦身的MobileNets。Width multiplier有减少计算复杂度和参数数量（大概$\alpha$二次方）的作用。Width multiplier可以应用于任何模型结构，以定义一个具有合理准确性，延迟和尺寸的新的较小的模型。它用于定义新的简化结构，但需要重新进行训练。
+
+### 8.4 Resolution Multiplier: Reduced Representation
+
+
 
 
 
@@ -171,7 +371,21 @@ ResNetXt模型总结：
 
 [Densely Connected Convolutional Networks](https://arxiv.org/abs/1608.06993)
 
+DenseNet的提出基于快速连接的思想，与ResNet异曲同工，它进一步利用了快捷连接的效果 - 它将所有层直接相互连接。在这种新颖的架构中，每层的输入由所有早期层的特征图组成，其输出传递给每个后续层。特征映射与深度级联聚合在一起。
 
+{% asset_img densenet1.png %}
+
+除了解决消失的渐变问题之外，作者认为这种架构还鼓励特征重用，使网络具有高参数效率。对此的一个简单解释是，身份映射的输出被添加到下一个块，如果两个层的特征映射具有非常不同的分布，则可能阻碍信息流。因此，连接特征映射可以保留所有特征映射并增加输出的方差，从而鼓励特征重用。
+
+{% asset_img densenet2.png %}
+
+遵循这个范例，我们知道第l层将具有$k \times（l-1）+ k_0$个输入要素图，其中$k_0$是输入图像中的通道数。作者使用了一个称为增长率（k）的超参数来防止网络过长，他们还使用1x1卷积瓶颈层来减少昂贵的3x3卷积之前的特征映射数量。整体结构如下表所示：
+
+{% asset_img densenet0.png %}
+
+DenseNet模型总结：
+
+* 更远距离的快速连接。
 
 ## 11. NASNetLarge & NASNetMobile
 
