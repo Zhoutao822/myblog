@@ -319,10 +319,10 @@ MobileNet引入了几个重要的技巧以降低运算量：
 
 {% asset_img mobilenetv1-1.png %}
 
-传统卷积考虑到通道数，对于输入通道数为$N$，输出通道数为$M$，输入长宽$D_k$，输出长宽$D_F$，则卷积层的计算量为
+传统卷积考虑到通道数，对于输入通道数为$N$，输出通道数为$M$，输入长宽$D_K$，输出长宽$D_F$，则卷积层的计算量为
 
 $$
-D_k \times D_k \times M \times N \times D_F \times D_F
+D_K \times D_K \times M \times N \times D_F \times D_F
 $$
 
 若采用深度可分离卷积，首先使用2D卷积核对所有通道进行处理，再使用3D1×1卷积核处理之前输出的特征图，最终得到的输出是与传统卷积是相同的
@@ -330,7 +330,7 @@ $$
 计算量分为两部分
 
 $$
-D_k \times D_k \times M \times D_F \times D_F
+D_K \times D_K \times M \times D_F \times D_F
 \\
 M \times N \times D_F \times D_F
 $$
@@ -338,7 +338,7 @@ $$
 显然总计算量为上述两部分之和，那么与传统卷积计算量的比值为
 
 $$
-\frac{1}{N} + \frac{1}{D_k^2}
+\frac{1}{N} + \frac{1}{D_K^2}
 $$
 
 MobileNet对3×3卷积进行这种改变使得计算量减少为原始的$\frac{1}{9}$，准确率仅下降一点。
@@ -360,9 +360,16 @@ $\alpha \in (0,1]$，通常设为1，0.75，0.5和0.25。$\alpha = 1$表示基�
 
 ### 8.4 Resolution Multiplier: Reduced Representation
 
+降低神经网络的第二个超参数是resolution multiplier ρ，简而言之就是作用于输出特征图大小（输出大小的系数），$\rho \in (0,1]$，通常设为224,192,160或者128。$\rho=1$是基本MobileNets而$\rho<1$示瘦身的MobileNets。计算量
 
+$$
+D_K \times D_K \times \alpha M \times \rho D_F \times \rho D_F + \alpha M \times \alpha N \times \rho D_F \times \rho D_F
+$$
 
+MobileNet模型总结：
 
+* 提供了Width Multiplier和Resolution Multiplier两个参数控制模型大小；
+* 提出了深度可分离卷积的思想。
 
 ## 9. MobileNetV2(alpha=0.35/0.50/0.75/1.0/1.3/1.4)
 
