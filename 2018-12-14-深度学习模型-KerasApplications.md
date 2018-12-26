@@ -21,7 +21,10 @@ mathjax: true
 > [深度学习---GoogLeNet](https://blog.csdn.net/qq_38906523/article/details/80061075)
 > [Inception-V4和Inception-Resnet论文阅读和代码解析](https://blog.csdn.net/stesha_chen/article/details/82115429)
 > [MobileNet 翻译及总结：用于移动视觉应用的高效卷积神经网络](https://blog.csdn.net/just_sort/article/details/79901885)
+> [轻量级网络--MobileNetV2论文解读](https://blog.csdn.net/u011974639/article/details/79199588)
+> [NASNet](https://blog.csdn.net/qq_14845119/article/details/83050862)
 
+{% asset_img cnn.png %}
 
 ImageNet项目是一个用于视觉对象识别软件研究的大型可视化数据库。超过1400万的图像URL被ImageNet手动注释，以指示图片中的对象；在至少一百万个图像中，还提供了边界框。ImageNet包含2万多个类别；一个典型的类别，如“气球”或“草莓”，包含数百个图像。第三方图像URL的注释数据库可以直接从ImageNet免费获得；但是，实际的图像不属于ImageNet。自2010年以来，ImageNet项目每年举办一次软件比赛，即ImageNet大规模视觉识别挑战赛（ILSVRC），软件程序竞相正确分类检测物体和场景。
 
@@ -308,7 +311,7 @@ Xception模型总结：
 
 [MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications](https://arxiv.org/abs/1704.04861)
 
-MobileNet的提出很明显是为了部署在移动设备上，与ImageNet比赛相比，移动设备对内存、运算速度等方面要求很高，精度要求可以适当降低，而传统的ImageNet比赛中取胜的模型的参数基本已经达到一个很高的程度，所以使用MobileNet部署在移动设备上成为另一个目标。
+MobileNet的提出很明显是为了部署在移动设备上，与ImageNet比赛相比，移动设备对内存、运算速度等方面要求很高，精度要求可以适当降低，而传统的ImageNet比赛中取胜的模型的参数基本已经达到一个很高的程度，所以使用MobileNet在保持类似精度的条件下显著的减少模型参数和计算量成为另一个目标。
 
 MobileNet引入了几个重要的技巧以降低运算量：
 
@@ -365,7 +368,41 @@ $\alpha \in (0,1]$，通常设为1，0.75，0.5和0.25。$\alpha = 1$表示基�
 
 [MobileNetV2: Inverted Residuals and Linear Bottlenecks](https://arxiv.org/abs/1801.04381)
 
+MobileNetv2架构是基于倒置残差结构(inverted residual structure)，原本的残差结构的主分支是有三个卷积，两个逐点卷积通道数较多，而倒置的残差结构刚好相反，中间的卷积通道数(依旧使用深度分离卷积结构)较多，旁边的较小。此外，我们发现去除主分支中的非线性变换是有效的，这可以保持模型表现力。
 
+MobileNetV2提出了manifold of interest（兴趣流行）概念，表示感兴趣的数据内容，但是目前无法定量描述，仅凭经验研究。
+
+我们的目的是在低维依然保持manifold of interest，但是实际上是将矩阵映射到低维后再进行ReLU，最后在求逆投影回原来的维度时，这种manifold of interest会丢失很多的信息。论文针对这个问题使用linear bottleneck(即不使用ReLU激活，做了线性变换)的来代替原本的非线性激活变换。所以通过在卷积模块中后插入linear bottleneck来捕获兴趣流行。 实验证明，使用linear bottleneck可以防止非线性破坏太多信息。
+
+{% asset_img mobilenetv2-1.png %}
+
+MobileNetv2的结构同样是将标准卷积拆分为深度卷积和逐点卷积，在逐点卷积后使用了接1×1卷积，该卷积使用线性变换，总称为一层低维linear bottleneck，其作用是将输入映射回低维空间。
+
+考虑到倒残差结构Inverted residuals，对于Expansion layer(即linear到深度卷积部分)仅是伴随张量非线性变换的部分实现细节，我们可将shortcuts放在linear bottleneck之间连接
+
+{% asset_img mobilenetv2-2.png %}
+
+下表是bottleneck convolution的基本实现：
+
+{% asset_img mobilenetv2-3.png %}
+
+* 首先是1×1 conv2d变换通道，后接ReLU6激活(ReLU6即最高输出为6，超过了会clip下来)
+* 中间是深度卷积,后接ReLU
+* 最后的1×1 conv2d后面不接ReLU了，而是论文提出的linear bottleneck
+
+{% asset_img mobilenetv2-4.png %}
+
+可以看到相比与之前的残差模块，中间的深度卷积较宽，除了开始的升维的1×1 1×11×1卷积，做shortcut的1×1 1×11×1卷积通道数较少，呈现的是倒立状态，故称为Inverted residuals。
+
+{% asset_img mobilenetv2-5.png %}
+
+训练细节：
+
+1. 训练器：RMSPropOptimizer, decay and momentum都设置0.9
+2. 标准的权重衰减：4e-5
+3. 学习率：初始学习率为0.045,每个epoch后衰减0.98
+4. batch_size：16GPU内设置96
+5. 其他细节：每层后使用BN层
 
 ## 10. DenseNet121 & DenseNet169 & DenseNet201
 
@@ -391,4 +428,50 @@ DenseNet模型总结：
 
 [Learning Transferable Architectures for Scalable Image Recognition](https://arxiv.org/abs/1707.07012)
 
+NasNet，是当前图像识别领域的最佳模型，这个模型并非是人为设计出来的，而是通过谷歌很早之前推出的AutoML自动训练出来的。
 
+NasNet的组成由两种网络单元组合而成
+
+{% asset_img nasnet1.png %}
+
+这两种单元的堆叠方案如下：
+
+{% asset_img nasnet0.png %}
+
+搜索过程：
+
+{% asset_img nasnet2.png %}
+
+如上图所示，控制器RNN从搜索空间中以概率p预测网络结构A。worker单元，学习该网络直到收敛，并得到准确性R。最终将梯度p*R传递给RNN控制器进行梯度更新。
+
+{% asset_img nasnet3.png %}
+
+控制器依次搜索隐藏状态，隐藏状态，何种操作，何种操作，何种组合方法，这5个方法和操作的组合。其中，每种方法，每种操作都对应于一个softmax损失。这样重复B次，得到一个最终block模块。最终的损失函数就有5B个。实验中最优的B=5。
+
+{% asset_img nasnet4.png %}
+
+其中，黄色的可选的操作包括上图所示的13种操作。
+
+最终论文得到了3个网络结构，分别为NASNet-A，NASNet-B， NASNet-C。
+
+NASNet-A：
+
+{% asset_img nasnet-a.png %}
+
+NASNet-B：
+
+{% asset_img nasnet-b.png %}
+
+NASNet-C：
+
+{% asset_img nasnet-c.png %}
+
+NasNet模型总结：
+
+* 设计了新的搜索空间，即NASNet search space，并在实验中搜索得到最优的网络结构NASNet
+
+* 不管是乘-加计算量，还是参数量，NASNet都优于目前人工设计的网络结构
+
+* 提出新的正则化技术，ScheduledDropPath，是DropPath方法的改进版，可以大大提高了模型的泛化能力。
+
+DropPath方法在训练过程中以随机概率p进行drop，该概率训练中保持不变。而ScheduledDropPath方法在训练过程线性的提高随机概率p。
