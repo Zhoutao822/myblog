@@ -377,9 +377,9 @@ MobileNet模型总结：
 
 MobileNetv2架构是基于倒置残差结构(inverted residual structure)，原本的残差结构的主分支是有三个卷积，两个逐点卷积通道数较多，而倒置的残差结构刚好相反，中间的卷积通道数(依旧使用深度分离卷积结构)较多，旁边的较小。此外，我们发现去除主分支中的非线性变换是有效的，这可以保持模型表现力。
 
-MobileNetV2提出了manifold of interest（兴趣流行）概念，表示感兴趣的数据内容，但是目前无法定量描述，仅凭经验研究。
+MobileNetV2提出了manifold of interest（兴趣流形）概念，表示感兴趣的数据内容，但是目前无法定量描述，仅凭经验研究。
 
-我们的目的是在低维依然保持manifold of interest，但是实际上是将矩阵映射到低维后再进行ReLU，最后在求逆投影回原来的维度时，这种manifold of interest会丢失很多的信息。论文针对这个问题使用linear bottleneck(即不使用ReLU激活，做了线性变换)的来代替原本的非线性激活变换。所以通过在卷积模块中后插入linear bottleneck来捕获兴趣流行。 实验证明，使用linear bottleneck可以防止非线性破坏太多信息。
+我们的目的是在低维依然保持manifold of interest，但是实际上是将矩阵映射到低维后再进行ReLU，最后在求逆投影回原来的维度时，这种manifold of interest会丢失很多的信息。论文针对这个问题使用linear bottleneck(即不使用ReLU激活，做了线性变换)的来代替原本的非线性激活变换。所以通过在卷积模块中后插入linear bottleneck来捕获兴趣流形。 实验证明，使用linear bottleneck可以防止非线性破坏太多信息。
 
 {% asset_img mobilenetv2-1.png %}
 
