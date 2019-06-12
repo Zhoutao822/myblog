@@ -1,7 +1,7 @@
 ---
 title: VSCode搭建LaTeX论文写作环境
 date: 2019-06-12 20:46:05
-tags:
+categories:
 - Tips
 tags:
 - LaTeX
@@ -12,8 +12,6 @@ tags:
 - MikTeX
 mathjax: true
 ---
-
-# VSCode搭建LaTeX论文写作环境
 
 参考：
 
@@ -34,6 +32,8 @@ mathjax: true
 在Windows下我选择的是MikTeX，Mac下选择的是MacTex，这个LaTeX发行版相当于一个开发工具包，你需要的编译器以及某些资源文件都包含在这个包里面，安装完成后可以通过命令行启用。
 
 在Windows下MikTeX的安装教程链接为[Install MiKTeX on Windows](https://miktex.org/howto/install-miktex)，链接里也给出了安装包的地址[Basic MiKTeX Installer](https://miktex.org/download)，安装完成后打开 MiKTeX Console 更新package。目前这个阶段还不需要安装额外的package，这个我们可以等到编译论文的时候再下载。
+
+<!-- more -->
 
 ### 2. VSCode安装与参数设置
 
