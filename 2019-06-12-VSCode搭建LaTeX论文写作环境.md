@@ -15,15 +15,15 @@ mathjax: true
 
 参考：
 
-[中国科学技术大学学位论文 LaTeX 模板](https://github.com/ustctug/ustcthesis)
+> [中国科学技术大学学位论文 LaTeX 模板](https://github.com/ustctug/ustcthesis)
 
-[论文写作的又一利器：VSCode + LaTeX Workshop + MikTex + Git](https://blog.csdn.net/yinqingwang/article/details/79684419)
+> [论文写作的又一利器：VSCode + LaTeX Workshop + MikTex + Git](https://blog.csdn.net/yinqingwang/article/details/79684419)
 
-[MikTeX](https://miktex.org/)
+> [MikTeX](https://miktex.org/)
 
-[MacTeX](https://www.tug.org/mactex/)
+> [MacTeX](https://www.tug.org/mactex/)
 
-[VSCode](https://code.visualstudio.com/)
+> [VSCode](https://code.visualstudio.com/)
 
 ## Windows环境
 
