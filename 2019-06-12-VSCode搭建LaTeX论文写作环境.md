@@ -162,7 +162,7 @@ VSCode的安装没什么可说的，完成后需要在**扩展**中搜索`latex`
 
 ### 1. 安装LaTeX发行版
 
-在Mac下选择的安装MacTeX，而MacTeX有几个不同的安装包，一个是`MacTeX.pkg`，大概3.9G，还有一个是`BasicTeX.pkg`，大概76M，区别在于前者包括了GUI，大概有4个工具配合使用，后者没有GUI仅提供命令行工具，这里我选择了后者，前者应该也没有区别。
+在Mac下选择的安装[MacTeX](https://www.tug.org/mactex/)，而MacTeX有几个不同的安装包，一个是`MacTeX.pkg`，大概3.9G，还有一个是`BasicTeX.pkg`，大概76M，区别在于前者包括了GUI，大概有4个工具配合使用，后者没有GUI仅提供命令行工具，这里我选择了后者，前者应该也没有区别。
 
 命令行工具为`tlmgr`，我在运行时需要加`sudo`，应该是安装路径对一般用户不可写。
 
