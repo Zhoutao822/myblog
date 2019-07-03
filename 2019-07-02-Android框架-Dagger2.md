@@ -14,10 +14,526 @@ tags:
 
 > [Android开发之dagger.android--Activity](https://www.jianshu.com/p/2ec39d8b7e98)
 > [Dagger](https://dagger.dev/)
+> [Dagger2 最清晰的使用教程](https://www.jianshu.com/p/24af4c102f62?utm_campaign=maleskine&utm_content=note&utm_medium=seo_notes&utm_source=recommendation)
+> [The New Dagger2](https://blog.mindorks.com/the-new-dagger-2-android-injector-cbe7d55afa6a)
 
+Dagger2框架是一个依赖注入框架，它既可以用于Java Web项目也可以用于Android项目，依赖注入是什么意思呢
 
+```java
+public class Dependent {
+    private Dependency dependency;
+
+    // 属性注入 
+    public Dependent(Dependency dependency) {
+        this.dependency = dependency;
+    }
+
+    // public Dependent(){
+    //     this.dependency = new Dependency();
+    // }
+
+    // 方法注入
+    // public void setDependency(Dependency dependency){
+    //     this.dependency = dependency;
+    // }
+
+    private void doSomething(){
+
+    }
+}
+```
+
+看名字知含义，在上面的代码中Dependent类的构造始终需要Dependency类，那么我们就称Dependency为依赖，将其引入Dependent中的过程称为注入，上述代码在构造函数中引入，当然也可以通过set方法引入，无论是哪种方式都会面临一个问题就是当我们后续如果需要修改Dependency的构造函数时，需要在所有包含`new Dependency()`的代码中进行修改，显然这是非常痛苦的事情，而且不符合依赖倒置原则，本文所涉及到的是通过注解的方式进行依赖注入可以解决这种问题。
 
 <!-- more -->
+
+## 1. Dagger2框架入门
+
+Dagger2框架最终的概念是注解，注解有什么用呢，我觉得是一种标记，这是由于Dagger2框架最终是通过根据不同的注解自动生成代码来实现的依赖注入，因此不同的注解表示通过不同的逻辑生成代码以实现其功能。
+
+从最简单最基础的注解开始，一步一步深入，了解其生成的源码的作用。
+
+### 1.1 @Inject和@Component
+
+比如我们需要一个Utils类
+
+```java
+public class Utils {
+    public Utils() {
+    }
+
+    public String showMessage() {
+        return "This is Utils";
+    }
+}
+```
+
+然后在MainActivity中使用showMessage方法
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    private Utils utils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        // 这里需要new一个对象出来才能调用showMessage方法
+        utils = new Utils();
+        Log.i(TAG, utils.showMessage());
+    }
+}
+```
+
+如果需要在其他Activity中继续使用Utils的showMessage方法，那么就需要重复在每一个Activity中new一个Utils对象，这时候产品经理来了跟你说在使用Utils的时候还需要使用ToastUtils，而且需要修改Utils的构造函数，将ToastUtils传进去
+
+```java
+public class ToastUtils {
+    public ToastUtils() {
+    }
+
+    public String showMessage() {
+        return "This is ToastUtils";
+    }
+}
+```
+
+```java
+public class Utils {
+
+    private ToastUtils toastUtils;
+
+    public Utils(ToastUtils toastUtils) {
+        this.toastUtils = toastUtils;
+    }
+
+    public String showMessage() {
+        return toastUtils.showMessage();
+    }
+}
+```
+
+此时，你是不是要疯了，需要在所有调用`new Utils()`的位置进行修改，也就意味着每一次修改构造函数都需要全部重新修改一次。
+
+通过dagger2框架是如何实现依赖注入的呢？
+
+* 首先是在依赖的构造函数上加上`@Inject`
+
+```java
+public class Utils {
+    @Inject
+    public Utils() {
+    }
+
+    public String showMessage() {
+        return "This is Utils";
+    }
+}
+```
+
+* 然后新建一个接口`MainActivityComponent`，要加上`@Component`，声明`inject`方法，参数为依赖被注入的类，这个接口向dagger2框架表明了需要注入的目标，即依赖者dependent
+
+```java
+@Component
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+* 最后在MainActivity中使用，直接在依赖上增加注解`@Inject`，在onCreate方法中调用`DaggerMainActivityComponent.create().inject(this);`，然后utils就被实例化了，可以直接使用，这里并没有看见new对象的操作
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    Utils utils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        // 在调用DaggerMainActivityComponent.create().inject(this)方法前先build一下，
+        // 会自动生成一些代码，其中包括DaggerMainActivityComponent类，否则无法使用
+        DaggerMainActivityComponent.create().inject(this);
+
+        Log.i(TAG, utils.showMessage());
+    }
+}
+```
+
+我们来看一下生成代码实现了哪些功能吧，主要包括三个类`DaggerMainActivityComponent.java`、`MainActivity_MembersInjector.java`、`Utils_Factory.java`
+
+```java
+// DaggerMainActivityComponent.java
+// DaggerMainActivityComponent是根据MainActivityComponent生成的，按照执行顺序分析
+public final class DaggerMainActivityComponent implements MainActivityComponent {
+// 3. DaggerMainActivityComponent构造函数    
+  private DaggerMainActivityComponent() {
+
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+// 1. create方法返回Builder().build()方法返回的对象
+  public static MainActivityComponent create() {
+    return new Builder().build();
+  }
+
+// 4. 调用inject方法
+  @Override
+  public void inject(MainActivity activity) {
+    injectMainActivity(activity);}
+
+// 5. inject方法实际执行的方法injectMainActivity
+  private MainActivity injectMainActivity(MainActivity instance) {
+    // 6. 调用MainActivity_MembersInjector.injectUtils(instance, new Utils())，这里出现了new出来的实例
+    // 接下来看MainActivity_MembersInjector类做了些什么
+    MainActivity_MembersInjector.injectUtils(instance, new Utils());
+    return instance;
+  }
+
+  public static final class Builder {
+    private Builder() {
+    }
+// 2. Builder().build()返回的对象是DaggerMainActivityComponent
+    public MainActivityComponent build() {
+      return new DaggerMainActivityComponent();
+    }
+  }
+}
+```
+
+```java
+// MainActivity_MembersInjector.java
+public final class MainActivity_MembersInjector implements MembersInjector<MainActivity> {
+  private final Provider<Utils> utilsProvider;
+
+  public MainActivity_MembersInjector(Provider<Utils> utilsProvider) {
+    this.utilsProvider = utilsProvider;
+  }
+
+  public static MembersInjector<MainActivity> create(Provider<Utils> utilsProvider) {
+    return new MainActivity_MembersInjector(utilsProvider);}
+
+  @Override
+  public void injectMembers(MainActivity instance) {
+    injectUtils(instance, utilsProvider.get());
+  }
+// 7. 接上面的执行，这就很明显了instance.utils = utils 等价于 MainActivity.utils = new Utils()
+// 也就是说到这里，其实依赖注入的功能就完成了，其他的代码并没有用到，但是不代表是无用的
+  public static void injectUtils(MainActivity instance, Utils utils) {
+    instance.utils = utils;
+  }
+}
+```
+
+按照增加ToastUtils的方式进行依赖注入是怎样的呢，需要修改如下代码
+
+```java
+public class ToastUtils {
+    // ToastUtils被Utils依赖，所以需要在构造函数上加上@Inject
+    @Inject
+    public ToastUtils(){
+
+    }
+
+    public String showMessage(){
+        return "This is ToastUtils";
+    }
+}
+```
+
+```java
+public class Utils {
+
+    private ToastUtils toastUtils;
+
+    // Utils的含参构造函数上加上@Inject
+    @Inject
+    public Utils(ToastUtils toastUtils) {
+        this.toastUtils = toastUtils;
+    }
+
+    public String showMessage() {
+        return toastUtils.showMessage();
+    }
+}
+```
+
+`MainActivityComponent.java`和`MainActivity.java`不用修改任何代码，那不就意味着我们解决了前面注入产生的修改代码的问题吗，因为没有new对象的代码；而且ToastUtils在Utils中也不是通过new对象产生的，而是层层注解注入的。
+
+此时再次看一下生成的代码文件`DaggerMainActivityComponent.java`、`MainActivity_MembersInjector.java`、`Utils_Factory.java`、`ToastUtils_Factory.java`
+
+```java
+public final class DaggerMainActivityComponent implements MainActivityComponent {
+  private DaggerMainActivityComponent() {
+
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static MainActivityComponent create() {
+    return new Builder().build();
+  }
+// getUtils()即返回了我们需要的带参Utils对象
+  private Utils getUtils() {
+    return new Utils(new ToastUtils());}
+
+  @Override
+  public void inject(MainActivity activity) {
+    injectMainActivity(activity);}
+// 这次直接看核心代码，MainActivity_MembersInjector.injectUtils(instance, getUtils())
+// MainActivity_MembersInjector.injectUtils方法也很熟悉了，效果同上文
+  private MainActivity injectMainActivity(MainActivity instance) {
+    MainActivity_MembersInjector.injectUtils(instance, getUtils());
+    return instance;
+  }
+
+  public static final class Builder {
+    private Builder() {
+    }
+
+    public MainActivityComponent build() {
+      return new DaggerMainActivityComponent();
+    }
+  }
+}
+```
+
+根据上文的分析，我们知道了我们需要的对象的实例其实是在生成的代码`DaggerMainActivityComponent.java`中new出来的，但是这个过程并不需要我们干预而是自动生成的，所以解决了部分依赖注入产生的问题。
+
+结合源码分析可知
+
+1. `@Inject`标注在构造器上的含义包括：
+
+* 告诉Dagger2可以使用这个构造器构建对象。如ToastUtils类
+* 注入构造器所需要的参数的依赖。 如Utils类，构造上的ToastUtils会被注入。
+
+构造器注入的局限：如果有多个构造器，我们只能标注其中一个，无法标注多个。
+
+2. `@Component`一般有两种方式定义方法
+
+* void inject(目标类 obj);Dagger2会从目标类开始查找@Inject注解，自动生成依赖注入的代码，调用inject可完成依赖的注入。
+* Object getObj(); 如：Utils getUtils();
+Dagger2会到Utils类中找被@Inject注解标注的构造器，自动生成提供Utils依赖的代码，这种方式一般为其他Component提供依赖。（一个Component可以依赖另一个Component，后面会说）
+
+使用接口定义，并且`@Component`注解。命名方式推荐为：目标类名+Component，在编译后Dagger2就会为我们生成DaggerXXXComponent这个类，它是我们定义的xxxComponent的实现，在目标类中使用它就可以实现依赖注入了。
+
+### 1.2 @Module和@Provides
+
+使用@Inject标记构造器提供依赖是有局限性的，比如说我们需要注入的对象是第三方库提供的，我们无法在第三方库的构造器上加上@Inject注解。
+
+或者，我们使用依赖倒置的时候，因为需要注入的对象是抽象的，@Inject也无法使用，因为抽象的类并不能实例化，比如：
+
+```java
+public abstract class AbstractUtils {
+
+    public abstract String showMessage();
+}
+```
+
+```java
+public class DBUtils extends AbstractUtils {
+
+    @Inject
+    DBUtils() {}
+
+    @Override
+    public String showMessage() {
+        return "This is DBUtils";
+    }
+}
+```
+
+```java
+public class ApiUtils extends AbstractUtils {
+
+    @Inject
+    ApiUtils() {}
+
+    @Override
+    public String showMessage() {
+        return "This is ApiUtils";
+    }
+}
+```
+
+```java
+public class DataUtils {
+
+    private AbstractUtils abstractUtils;
+
+    @Inject
+    public DataUtils(AbstractUtils abstractUtils) {
+        this.abstractUtils = abstractUtils;
+    }
+
+    public String show() {
+        return abstractUtils.showMessage();
+    }
+}
+```
+
+`MainActivityComponent.java`不变，如果在MainActivity中引入DataUtils会报错，此时需要修改代码
+
+```java
+public class DBUtils extends AbstractUtils {
+
+    @Override
+    public String showMessage() {
+        return "This is DBUtils";
+    }
+}
+```
+
+```java
+public class ApiUtils extends AbstractUtils {
+
+    @Override
+    public String showMessage() {
+        return "This is ApiUtils";
+    }
+}
+```
+
+需要新建一个Module类，用于提供需要的实例，这里返回的是DBUtils对象，@Provodes标记在方法上，表示可以通过这个方法获取依赖
+
+```java
+@Module
+public class DataUtilsModule {
+
+    @Provides
+    AbstractUtils provideDataUtils() {
+        return new DBUtils();
+    }
+}
+```
+
+修改Component代码
+
+```java
+@Component(modules = DataUtilsModule.class)
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+最后在MainActivity中引入
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+    @Inject
+    DataUtils dataUtils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        DaggerMainActivityComponent.create().inject(this);
+        // 很显然，这里引入的是DBUtils对象
+        Log.i(TAG, dataUtils.show());
+    }
+}
+```
+
+通过修改`DataUtilsModule`中`provideDataUtils`方法返回的对象，我们可以控制抽象类的具体子类是DBUtils还是ApiUtils，而主题代码不需要改动。
+
+此时代码分析包括`DaggerMainActivityComponent.java`、`DataUtilsModule_ProvideDataUtilsFactory.java`、``、``、`MainActivity_MembersInjector.java`
+
+```java
+public final class DaggerMainActivityComponent implements MainActivityComponent {
+  private final DataUtilsModule dataUtilsModule;
+
+  private DaggerMainActivityComponent(DataUtilsModule dataUtilsModuleParam) {
+    this.dataUtilsModule = dataUtilsModuleParam;
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static MainActivityComponent create() {
+    return new Builder().build();
+  }
+// getDataUtils()返回的是
+// new DataUtils(DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule))
+// 构造函数的参数为DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule)
+// 接下来看这个方法provideDataUtils的返回值
+  private DataUtils getDataUtils() {
+    return new DataUtils(DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule));}
+
+  @Override
+  public void inject(MainActivity activity) {
+    injectMainActivity(activity);}
+// 直接看核心代码，MainActivity_MembersInjector.injectDataUtils(instance, getDataUtils())
+// 根据getDataUtils方法的返回值可知，其返回的是DataUtils实例
+// MainActivity_MembersInjector.injectDataUtils方法也是很熟悉，同上
+  private MainActivity injectMainActivity(MainActivity instance) {
+    MainActivity_MembersInjector.injectDataUtils(instance, getDataUtils());
+    return instance;
+  }
+
+  public static final class Builder {
+    private DataUtilsModule dataUtilsModule;
+
+    private Builder() {
+    }
+
+    public Builder dataUtilsModule(DataUtilsModule dataUtilsModule) {
+      this.dataUtilsModule = Preconditions.checkNotNull(dataUtilsModule);
+      return this;
+    }
+
+    public MainActivityComponent build() {
+      if (dataUtilsModule == null) {
+        this.dataUtilsModule = new DataUtilsModule();
+      }
+      return new DaggerMainActivityComponent(dataUtilsModule);
+    }
+  }
+}
+```
+
+```java
+public final class DataUtilsModule_ProvideDataUtilsFactory implements Factory<AbstractUtils> {
+  private final DataUtilsModule module;
+
+  public DataUtilsModule_ProvideDataUtilsFactory(DataUtilsModule module) {
+    this.module = module;
+  }
+
+  @Override
+  public AbstractUtils get() {
+    return provideDataUtils(module);
+  }
+
+  public static DataUtilsModule_ProvideDataUtilsFactory create(DataUtilsModule module) {
+    return new DataUtilsModule_ProvideDataUtilsFactory(module);
+  }
+// 上述代码直接调用的是下面这个方法，返回的是DataUtilsModule.provideDataUtils()
+// DataUtilsModule根据我们定义的时候可知，provideDataUtils返回的是new DBUtils()对象
+  public static AbstractUtils provideDataUtils(DataUtilsModule instance) {
+    return Preconditions.checkNotNull(instance.provideDataUtils(), "Cannot return null from a non-@Nullable @Provides method");
+  }
+}
+```
+
+### 1.3 @Qualifier和@Named
+
+
+
+
+
+
 
 
 ## dagger.android
