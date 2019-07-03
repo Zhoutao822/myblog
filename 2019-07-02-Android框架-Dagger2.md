@@ -14,10 +14,526 @@ tags:
 
 > [Android开发之dagger.android--Activity](https://www.jianshu.com/p/2ec39d8b7e98)
 > [Dagger](https://dagger.dev/)
+> [Dagger2 最清晰的使用教程](https://www.jianshu.com/p/24af4c102f62?utm_campaign=maleskine&utm_content=note&utm_medium=seo_notes&utm_source=recommendation)
+> [The New Dagger2](https://blog.mindorks.com/the-new-dagger-2-android-injector-cbe7d55afa6a)
 
+Dagger2框架是一个依赖注入框架，它既可以用于Java Web项目也可以用于Android项目，依赖注入是什么意思呢
 
+```java
+public class Dependent {
+    private Dependency dependency;
+
+    // 属性注入 
+    public Dependent(Dependency dependency) {
+        this.dependency = dependency;
+    }
+
+    // public Dependent(){
+    //     this.dependency = new Dependency();
+    // }
+
+    // 方法注入
+    // public void setDependency(Dependency dependency){
+    //     this.dependency = dependency;
+    // }
+
+    private void doSomething(){
+
+    }
+}
+```
+
+看名字知含义，在上面的代码中Dependent类的构造始终需要Dependency类，那么我们就称Dependency为依赖，将其引入Dependent中的过程称为注入，上述代码在构造函数中引入，当然也可以通过set方法引入，无论是哪种方式都会面临一个问题就是当我们后续如果需要修改Dependency的构造函数时，需要在所有包含`new Dependency()`的代码中进行修改，显然这是非常痛苦的事情，而且不符合依赖倒置原则，本文所涉及到的是通过注解的方式进行依赖注入可以解决这种问题。
 
 <!-- more -->
+
+## 1. Dagger2框架入门
+
+Dagger2框架最终的概念是注解，注解有什么用呢，我觉得是一种标记，这是由于Dagger2框架最终是通过根据不同的注解自动生成代码来实现的依赖注入，因此不同的注解表示通过不同的逻辑生成代码以实现其功能。
+
+从最简单最基础的注解开始，一步一步深入，了解其生成的源码的作用。
+
+### 1.1 @Inject和@Component
+
+比如我们需要一个Utils类
+
+```java
+public class Utils {
+    public Utils() {
+    }
+
+    public String showMessage() {
+        return "This is Utils";
+    }
+}
+```
+
+然后在MainActivity中使用showMessage方法
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    private Utils utils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        // 这里需要new一个对象出来才能调用showMessage方法
+        utils = new Utils();
+        Log.i(TAG, utils.showMessage());
+    }
+}
+```
+
+如果需要在其他Activity中继续使用Utils的showMessage方法，那么就需要重复在每一个Activity中new一个Utils对象，这时候产品经理来了跟你说在使用Utils的时候还需要使用ToastUtils，而且需要修改Utils的构造函数，将ToastUtils传进去
+
+```java
+public class ToastUtils {
+    public ToastUtils() {
+    }
+
+    public String showMessage() {
+        return "This is ToastUtils";
+    }
+}
+```
+
+```java
+public class Utils {
+
+    private ToastUtils toastUtils;
+
+    public Utils(ToastUtils toastUtils) {
+        this.toastUtils = toastUtils;
+    }
+
+    public String showMessage() {
+        return toastUtils.showMessage();
+    }
+}
+```
+
+此时，你是不是要疯了，需要在所有调用`new Utils()`的位置进行修改，也就意味着每一次修改构造函数都需要全部重新修改一次。
+
+通过dagger2框架是如何实现依赖注入的呢？
+
+* 首先是在依赖的构造函数上加上`@Inject`
+
+```java
+public class Utils {
+    @Inject
+    public Utils() {
+    }
+
+    public String showMessage() {
+        return "This is Utils";
+    }
+}
+```
+
+* 然后新建一个接口`MainActivityComponent`，要加上`@Component`，声明`inject`方法，参数为依赖被注入的类，这个接口向dagger2框架表明了需要注入的目标，即依赖者dependent
+
+```java
+@Component
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+* 最后在MainActivity中使用，直接在依赖上增加注解`@Inject`，在onCreate方法中调用`DaggerMainActivityComponent.create().inject(this);`，然后utils就被实例化了，可以直接使用，这里并没有看见new对象的操作
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    Utils utils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        // 在调用DaggerMainActivityComponent.create().inject(this)方法前先build一下，
+        // 会自动生成一些代码，其中包括DaggerMainActivityComponent类，否则无法使用
+        DaggerMainActivityComponent.create().inject(this);
+
+        Log.i(TAG, utils.showMessage());
+    }
+}
+```
+
+我们来看一下生成代码实现了哪些功能吧，主要包括三个类`DaggerMainActivityComponent.java`、`MainActivity_MembersInjector.java`、`Utils_Factory.java`
+
+```java
+// DaggerMainActivityComponent.java
+// DaggerMainActivityComponent是根据MainActivityComponent生成的，按照执行顺序分析
+public final class DaggerMainActivityComponent implements MainActivityComponent {
+// 3. DaggerMainActivityComponent构造函数    
+  private DaggerMainActivityComponent() {
+
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+// 1. create方法返回Builder().build()方法返回的对象
+  public static MainActivityComponent create() {
+    return new Builder().build();
+  }
+
+// 4. 调用inject方法
+  @Override
+  public void inject(MainActivity activity) {
+    injectMainActivity(activity);}
+
+// 5. inject方法实际执行的方法injectMainActivity
+  private MainActivity injectMainActivity(MainActivity instance) {
+    // 6. 调用MainActivity_MembersInjector.injectUtils(instance, new Utils())，这里出现了new出来的实例
+    // 接下来看MainActivity_MembersInjector类做了些什么
+    MainActivity_MembersInjector.injectUtils(instance, new Utils());
+    return instance;
+  }
+
+  public static final class Builder {
+    private Builder() {
+    }
+// 2. Builder().build()返回的对象是DaggerMainActivityComponent
+    public MainActivityComponent build() {
+      return new DaggerMainActivityComponent();
+    }
+  }
+}
+```
+
+```java
+// MainActivity_MembersInjector.java
+public final class MainActivity_MembersInjector implements MembersInjector<MainActivity> {
+  private final Provider<Utils> utilsProvider;
+
+  public MainActivity_MembersInjector(Provider<Utils> utilsProvider) {
+    this.utilsProvider = utilsProvider;
+  }
+
+  public static MembersInjector<MainActivity> create(Provider<Utils> utilsProvider) {
+    return new MainActivity_MembersInjector(utilsProvider);}
+
+  @Override
+  public void injectMembers(MainActivity instance) {
+    injectUtils(instance, utilsProvider.get());
+  }
+// 7. 接上面的执行，这就很明显了instance.utils = utils 等价于 MainActivity.utils = new Utils()
+// 也就是说到这里，其实依赖注入的功能就完成了，其他的代码并没有用到，但是不代表是无用的
+  public static void injectUtils(MainActivity instance, Utils utils) {
+    instance.utils = utils;
+  }
+}
+```
+
+按照增加ToastUtils的方式进行依赖注入是怎样的呢，需要修改如下代码
+
+```java
+public class ToastUtils {
+    // ToastUtils被Utils依赖，所以需要在构造函数上加上@Inject
+    @Inject
+    public ToastUtils(){
+
+    }
+
+    public String showMessage(){
+        return "This is ToastUtils";
+    }
+}
+```
+
+```java
+public class Utils {
+
+    private ToastUtils toastUtils;
+
+    // Utils的含参构造函数上加上@Inject
+    @Inject
+    public Utils(ToastUtils toastUtils) {
+        this.toastUtils = toastUtils;
+    }
+
+    public String showMessage() {
+        return toastUtils.showMessage();
+    }
+}
+```
+
+`MainActivityComponent.java`和`MainActivity.java`不用修改任何代码，那不就意味着我们解决了前面注入产生的修改代码的问题吗，因为没有new对象的代码；而且ToastUtils在Utils中也不是通过new对象产生的，而是层层注解注入的。
+
+此时再次看一下生成的代码文件`DaggerMainActivityComponent.java`、`MainActivity_MembersInjector.java`、`Utils_Factory.java`、`ToastUtils_Factory.java`
+
+```java
+public final class DaggerMainActivityComponent implements MainActivityComponent {
+  private DaggerMainActivityComponent() {
+
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static MainActivityComponent create() {
+    return new Builder().build();
+  }
+// getUtils()即返回了我们需要的带参Utils对象
+  private Utils getUtils() {
+    return new Utils(new ToastUtils());}
+
+  @Override
+  public void inject(MainActivity activity) {
+    injectMainActivity(activity);}
+// 这次直接看核心代码，MainActivity_MembersInjector.injectUtils(instance, getUtils())
+// MainActivity_MembersInjector.injectUtils方法也很熟悉了，效果同上文
+  private MainActivity injectMainActivity(MainActivity instance) {
+    MainActivity_MembersInjector.injectUtils(instance, getUtils());
+    return instance;
+  }
+
+  public static final class Builder {
+    private Builder() {
+    }
+
+    public MainActivityComponent build() {
+      return new DaggerMainActivityComponent();
+    }
+  }
+}
+```
+
+根据上文的分析，我们知道了我们需要的对象的实例其实是在生成的代码`DaggerMainActivityComponent.java`中new出来的，但是这个过程并不需要我们干预而是自动生成的，所以解决了部分依赖注入产生的问题。
+
+结合源码分析可知
+
+1. `@Inject`标注在构造器上的含义包括：
+
+* 告诉Dagger2可以使用这个构造器构建对象。如ToastUtils类
+* 注入构造器所需要的参数的依赖。 如Utils类，构造上的ToastUtils会被注入。
+
+构造器注入的局限：如果有多个构造器，我们只能标注其中一个，无法标注多个。
+
+2. `@Component`一般有两种方式定义方法
+
+* void inject(目标类 obj);Dagger2会从目标类开始查找@Inject注解，自动生成依赖注入的代码，调用inject可完成依赖的注入。
+* Object getObj(); 如：Utils getUtils();
+Dagger2会到Utils类中找被@Inject注解标注的构造器，自动生成提供Utils依赖的代码，这种方式一般为其他Component提供依赖。（一个Component可以依赖另一个Component，后面会说）
+
+使用接口定义，并且`@Component`注解。命名方式推荐为：目标类名+Component，在编译后Dagger2就会为我们生成DaggerXXXComponent这个类，它是我们定义的xxxComponent的实现，在目标类中使用它就可以实现依赖注入了。
+
+### 1.2 @Module和@Provides
+
+使用@Inject标记构造器提供依赖是有局限性的，比如说我们需要注入的对象是第三方库提供的，我们无法在第三方库的构造器上加上@Inject注解。
+
+或者，我们使用依赖倒置的时候，因为需要注入的对象是抽象的，@Inject也无法使用，因为抽象的类并不能实例化，比如：
+
+```java
+public abstract class AbstractUtils {
+
+    public abstract String showMessage();
+}
+```
+
+```java
+public class DBUtils extends AbstractUtils {
+
+    @Inject
+    DBUtils() {}
+
+    @Override
+    public String showMessage() {
+        return "This is DBUtils";
+    }
+}
+```
+
+```java
+public class ApiUtils extends AbstractUtils {
+
+    @Inject
+    ApiUtils() {}
+
+    @Override
+    public String showMessage() {
+        return "This is ApiUtils";
+    }
+}
+```
+
+```java
+public class DataUtils {
+
+    private AbstractUtils abstractUtils;
+
+    @Inject
+    public DataUtils(AbstractUtils abstractUtils) {
+        this.abstractUtils = abstractUtils;
+    }
+
+    public String show() {
+        return abstractUtils.showMessage();
+    }
+}
+```
+
+`MainActivityComponent.java`不变，如果在MainActivity中引入DataUtils会报错，此时需要修改代码
+
+```java
+public class DBUtils extends AbstractUtils {
+
+    @Override
+    public String showMessage() {
+        return "This is DBUtils";
+    }
+}
+```
+
+```java
+public class ApiUtils extends AbstractUtils {
+
+    @Override
+    public String showMessage() {
+        return "This is ApiUtils";
+    }
+}
+```
+
+需要新建一个Module类，用于提供需要的实例，这里返回的是DBUtils对象，@Provodes标记在方法上，表示可以通过这个方法获取依赖
+
+```java
+@Module
+public class DataUtilsModule {
+
+    @Provides
+    AbstractUtils provideDataUtils() {
+        return new DBUtils();
+    }
+}
+```
+
+修改Component代码
+
+```java
+@Component(modules = DataUtilsModule.class)
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+最后在MainActivity中引入
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+    @Inject
+    DataUtils dataUtils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        DaggerMainActivityComponent.create().inject(this);
+        // 很显然，这里引入的是DBUtils对象
+        Log.i(TAG, dataUtils.show());
+    }
+}
+```
+
+通过修改`DataUtilsModule`中`provideDataUtils`方法返回的对象，我们可以控制抽象类的具体子类是DBUtils还是ApiUtils，而主题代码不需要改动。
+
+此时代码分析包括`DaggerMainActivityComponent.java`、`DataUtilsModule_ProvideDataUtilsFactory.java`、``、``、`MainActivity_MembersInjector.java`
+
+```java
+public final class DaggerMainActivityComponent implements MainActivityComponent {
+  private final DataUtilsModule dataUtilsModule;
+
+  private DaggerMainActivityComponent(DataUtilsModule dataUtilsModuleParam) {
+    this.dataUtilsModule = dataUtilsModuleParam;
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static MainActivityComponent create() {
+    return new Builder().build();
+  }
+// getDataUtils()返回的是
+// new DataUtils(DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule))
+// 构造函数的参数为DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule)
+// 接下来看这个方法provideDataUtils的返回值
+  private DataUtils getDataUtils() {
+    return new DataUtils(DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule));}
+
+  @Override
+  public void inject(MainActivity activity) {
+    injectMainActivity(activity);}
+// 直接看核心代码，MainActivity_MembersInjector.injectDataUtils(instance, getDataUtils())
+// 根据getDataUtils方法的返回值可知，其返回的是DataUtils实例
+// MainActivity_MembersInjector.injectDataUtils方法也是很熟悉，同上
+  private MainActivity injectMainActivity(MainActivity instance) {
+    MainActivity_MembersInjector.injectDataUtils(instance, getDataUtils());
+    return instance;
+  }
+
+  public static final class Builder {
+    private DataUtilsModule dataUtilsModule;
+
+    private Builder() {
+    }
+
+    public Builder dataUtilsModule(DataUtilsModule dataUtilsModule) {
+      this.dataUtilsModule = Preconditions.checkNotNull(dataUtilsModule);
+      return this;
+    }
+
+    public MainActivityComponent build() {
+      if (dataUtilsModule == null) {
+        this.dataUtilsModule = new DataUtilsModule();
+      }
+      return new DaggerMainActivityComponent(dataUtilsModule);
+    }
+  }
+}
+```
+
+```java
+public final class DataUtilsModule_ProvideDataUtilsFactory implements Factory<AbstractUtils> {
+  private final DataUtilsModule module;
+
+  public DataUtilsModule_ProvideDataUtilsFactory(DataUtilsModule module) {
+    this.module = module;
+  }
+
+  @Override
+  public AbstractUtils get() {
+    return provideDataUtils(module);
+  }
+
+  public static DataUtilsModule_ProvideDataUtilsFactory create(DataUtilsModule module) {
+    return new DataUtilsModule_ProvideDataUtilsFactory(module);
+  }
+// 上述代码直接调用的是下面这个方法，返回的是DataUtilsModule.provideDataUtils()
+// DataUtilsModule根据我们定义的时候可知，provideDataUtils返回的是new DBUtils()对象
+  public static AbstractUtils provideDataUtils(DataUtilsModule instance) {
+    return Preconditions.checkNotNull(instance.provideDataUtils(), "Cannot return null from a non-@Nullable @Provides method");
+  }
+}
+```
+
+### 1.3 @Qualifier和@Named
+
+
+
+
+
+
 
 
 ## dagger.android
@@ -299,12 +815,17 @@ public final class DaggerAppComponent implements AppComponent {
     return new Builder().build();
   }
 
+// 11. getMapOfClassOfAndProviderOfAndroidInjectorFactoryOf方法返回的是SingletonMap，key是MainActivity.class
+// value是mainActivitySubComponentFactoryProvider，简而言之还是一个map，然后需要看10中DispatchingAndroidInjector_Factory
+// 的实例是如何构造的
   private Map<Class<?>, Provider<AndroidInjector.Factory<?>>>
       getMapOfClassOfAndProviderOfAndroidInjectorFactoryOf() {
     return Collections.<Class<?>, Provider<AndroidInjector.Factory<?>>>singletonMap(
         MainActivity.class, (Provider) mainActivitySubComponentFactoryProvider);
   }
 
+// 10. getDispatchingAndroidInjectorOfActivity返回的是DispatchingAndroidInjector_Factory的实例
+// 带入了参数getMapOfClassOfAndProviderOfAndroidInjectorFactoryOf()以及一个emptyMap，对的就是空map，仅包含了key和value的类型
   private DispatchingAndroidInjector<Activity> getDispatchingAndroidInjectorOfActivity() {
     return DispatchingAndroidInjector_Factory.newInstance(
         getMapOfClassOfAndProviderOfAndroidInjectorFactoryOf(),
@@ -335,11 +856,16 @@ public final class DaggerAppComponent implements AppComponent {
         DoubleCheck.provider(AppModule_ProvideGlobalInfoFactory.create(appModuleParam));
   }
 
+// 8. DaggerAppComponent.create().inject(this)的最后一步，实际调用injectMyApplication
   @Override
   public void inject(MyApplication application) {
     injectMyApplication(application);
   }
 
+// 9. 两个关键，MyApplication_MembersInjector类以及本地的getDispatchingAndroidInjectorOfActivity()方法
+// MyApplication_MembersInjector类后续再介绍，但是本质上injectDispatchingActivityInjector方法等价于
+// instance.DispatchingActivityInjector = getDispatchingAndroidInjectorOfActivity()
+// 先看getDispatchingAndroidInjectorOfActivity()方法
   private MyApplication injectMyApplication(MyApplication instance) {
     MyApplication_MembersInjector.injectDispatchingActivityInjector(
         instance, getDispatchingAndroidInjectorOfActivity());
@@ -389,7 +915,7 @@ public final class DaggerAppComponent implements AppComponent {
 // 7. 最终调用inject方法时，我们看到了inject(MainActivity arg0)参数为MainActivity，
 // 想必此时你应该猜到了在MainActivity中的一句话AndroidInjection.inject(this)竟然能在异国他乡被实现
     private MainActivity injectMainActivity(MainActivity instance) {
-      // 这里的两个方法injectEntity和injectInfo分别对应了我们在MainActivity中注入的两个对象，instance时MainActivity，
+      // 这里的两个方法injectEntity和injectInfo分别对应了我们在MainActivity中注入的两个对象，instance是MainActivity，
       // provideEntityProvider.get()和provideGlobalInfoProvider.get()方法对应上面initialize方法初始化的私有变量，
       // 看这个方法的样子就知道这是对MainActivity进行注入的实际方法，MainActivity_MembersInjector的作用将在下面继续介绍
       MainActivity_MembersInjector.injectEntity(
@@ -400,9 +926,362 @@ public final class DaggerAppComponent implements AppComponent {
     }
   }
 }
-
 ```
 
+```java
+// MainActivityModule_ProvideEntityFactory.java
+// 接上文4.2
+// Factory<Entity>继承自Provider，Provider之前提到过用于提供构造好的实例，通过get方法返回
+public final class MainActivityModule_ProvideEntityFactory implements Factory<Entity> {
+  private static final MainActivityModule_ProvideEntityFactory INSTANCE =
+      new MainActivityModule_ProvideEntityFactory();
+
+  @Override
+  public Entity get() {
+    return provideEntity();
+  }
+// 4.2-1 首先是create方法返回实例，这是饿汉式单例模式，在类初始化时，已经自行实例化
+  public static MainActivityModule_ProvideEntityFactory create() {
+    return INSTANCE;
+  }
+// 接上文7-1，provideEntity方法返回的是MainActivityModule.provideEntity()，而MainActivityModule
+// 是我们定义的，MainActivityModule.provideEntity()返回new Entity()，所以我们最终得到了new出来的对象
+  public static Entity provideEntity() {
+    return Preconditions.checkNotNull(
+        MainActivityModule.provideEntity(),
+        "Cannot return null from a non-@Nullable @Provides method");
+  }
+}
+```
+
+```java
+// AppModule_ProvideGlobalInfoFactory.java
+// 接上文4.3
+public final class AppModule_ProvideGlobalInfoFactory implements Factory<String> {
+  private final AppModule module;
+
+  public AppModule_ProvideGlobalInfoFactory(AppModule module) {
+    this.module = module;
+  }
+
+  @Override
+  public String get() {
+    return provideGlobalInfo(module);
+  }
+// 4.3-1 首先也是create方法，观察一下与MainActivityModule_ProvideEntityFactory的create方法的不同之处
+// 这里通过构造方法返回了实例，而不是单例模式，要知道AppModule和MainActivityModule中都是加入了Singleton注解
+// todo 这可能是因为需要传入参数create(AppModule module)的原因，而且AppModule是一个类而MainActivityModule
+// 是一个抽象类
+  public static AppModule_ProvideGlobalInfoFactory create(AppModule module) {
+    return new AppModule_ProvideGlobalInfoFactory(module);
+  }
+// 接上文7-1，provideGlobalInfo返回的就是我们在AppModule定义的String "This is global info"
+  public static String provideGlobalInfo(AppModule instance) {
+    return Preconditions.checkNotNull(
+        instance.provideGlobalInfo(), "Cannot return null from a non-@Nullable @Provides method");
+  }
+}
+```
+
+```java
+// DispatchingAndroidInjector_Factory.java
+// 接上文10，我们传入的参数是两个map，一个为空，另一个与MainActivity相关
+public final class DispatchingAndroidInjector_Factory<T>
+    implements Factory<DispatchingAndroidInjector<T>> {
+  private final Provider<Map<Class<?>, Provider<AndroidInjector.Factory<?>>>>
+      injectorFactoriesWithClassKeysProvider;
+
+  private final Provider<Map<String, Provider<AndroidInjector.Factory<?>>>>
+      injectorFactoriesWithStringKeysProvider;
+
+  public DispatchingAndroidInjector_Factory(
+      Provider<Map<Class<?>, Provider<AndroidInjector.Factory<?>>>>
+          injectorFactoriesWithClassKeysProvider,
+      Provider<Map<String, Provider<AndroidInjector.Factory<?>>>>
+          injectorFactoriesWithStringKeysProvider) {
+    this.injectorFactoriesWithClassKeysProvider = injectorFactoriesWithClassKeysProvider;
+    this.injectorFactoriesWithStringKeysProvider = injectorFactoriesWithStringKeysProvider;
+  }
+
+  @Override
+  public DispatchingAndroidInjector<T> get() {
+    return new DispatchingAndroidInjector<T>(
+        injectorFactoriesWithClassKeysProvider.get(),
+        injectorFactoriesWithStringKeysProvider.get());
+  }
+
+  public static <T> DispatchingAndroidInjector_Factory<T> create(
+      Provider<Map<Class<?>, Provider<AndroidInjector.Factory<?>>>>
+          injectorFactoriesWithClassKeysProvider,
+      Provider<Map<String, Provider<AndroidInjector.Factory<?>>>>
+          injectorFactoriesWithStringKeysProvider) {
+    return new DispatchingAndroidInjector_Factory<T>(
+        injectorFactoriesWithClassKeysProvider, injectorFactoriesWithStringKeysProvider);
+  }
+
+// 10-1 newInstance返回的是DispatchingAndroidInjector，先简单说明一下这个类的作用
+// DispatchingAndroidInjector类是一个完成对Activity或Fragment进行依赖注入的类，因为传入的参数包括
+// injectorFactoriesWithClassKeys，这个Map根据前面的分析可知它的key就是Activity.class或者Fragment.class
+// 即依赖注入的位置，它的value是一个Provider，这个Provider提供inject方法，专门用于将依赖实例注入到
+// key对应的Activity或Fragment中
+  public static <T> DispatchingAndroidInjector<T> newInstance(
+      Map<Class<?>, Provider<AndroidInjector.Factory<?>>> injectorFactoriesWithClassKeys,
+      Map<String, Provider<AndroidInjector.Factory<?>>> injectorFactoriesWithStringKeys) {
+    return new DispatchingAndroidInjector<T>(
+        injectorFactoriesWithClassKeys, injectorFactoriesWithStringKeys);
+  }
+}
+```
+
+详细分析DispatchingAndroidInjector类的功能
+
+```java
+// 注释已经说的很清楚了，DispatchingAndroidInjector类是一个完成对Activity或Fragment进行依赖注入的类
+/**
+ * Performs members-injection on instances of core Android types (e.g. {@link Activity}, {@link
+ * Fragment}) that are constructed by the Android framework and not by Dagger. This class relies on
+ * an injected mapping from each concrete class to an {@link AndroidInjector.Factory} for an {@link
+ * AndroidInjector} of that class. Each concrete class must have its own entry in the map, even if
+ * it extends another class which is already present in the map. Calls {@link Object#getClass()} on
+ * the instance in order to find the appropriate {@link AndroidInjector.Factory}.
+ *
+ * @param <T> the core Android type to be injected
+ */
+@Beta
+public final class DispatchingAndroidInjector<T> implements AndroidInjector<T> {
+  private static final String NO_SUPERTYPES_BOUND_FORMAT =
+      "No injector factory bound for Class<%s>";
+  private static final String SUPERTYPES_BOUND_FORMAT =
+      "No injector factory bound for Class<%1$s>. Injector factories were bound for supertypes "
+          + "of %1$s: %2$s. Did you mean to bind an injector factory for the subtype?";
+
+  private final Map<String, Provider<AndroidInjector.Factory<?>>> injectorFactories;
+
+// 接上文10-1，这里就是初始化的位置，调用了merge方法
+  @Inject
+  DispatchingAndroidInjector(
+      Map<Class<?>, Provider<AndroidInjector.Factory<?>>> injectorFactoriesWithClassKeys,
+      Map<String, Provider<AndroidInjector.Factory<?>>> injectorFactoriesWithStringKeys) {
+    this.injectorFactories = merge(injectorFactoriesWithClassKeys, injectorFactoriesWithStringKeys);
+  }
+
+// merge方法注释也说明了，就是将classKeyedMap的key从Class改为Class.getName的形式
+  /**
+   * Merges the two maps into one by transforming the values of the {@code classKeyedMap} with
+   * {@link Class#getName()}.
+   *
+   * <p>An SPI plugin verifies the logical uniqueness of the keysets of these two maps so we're
+   * assured there's no overlap.
+   *
+   * <p>Ideally we could achieve this with a generic {@code @Provides} method, but we'd need to have
+   * <i>N</i> modules that each extend one base module.
+   */
+  private static <C, V> Map<String, Provider<AndroidInjector.Factory<?>>> merge(
+      Map<Class<? extends C>, V> classKeyedMap, Map<String, V> stringKeyedMap) {
+    if (classKeyedMap.isEmpty()) {
+      @SuppressWarnings({"unchecked", "rawtypes"})
+      Map<String, Provider<AndroidInjector.Factory<?>>> safeCast = (Map) stringKeyedMap;
+      return safeCast;
+    }
+
+    Map<String, V> merged =
+        newLinkedHashMapWithExpectedSize(classKeyedMap.size() + stringKeyedMap.size());
+    merged.putAll(stringKeyedMap);
+    for (Entry<Class<? extends C>, V> entry : classKeyedMap.entrySet()) {
+      // put的位置，key是entry.getKey().getName()即Class.getName()，value为entry.getValue()
+      // 即与classKeyedMap的value相同
+      merged.put(entry.getKey().getName(), entry.getValue());
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    Map<String, Provider<AndroidInjector.Factory<?>>> safeCast = (Map) merged;
+    return Collections.unmodifiableMap(safeCast);
+  }
+
+// maybeInject方法即最终调用的位置，instance可以是Activity或者Fragment，如果对应我们之前的代码
+// 此处应该是instance为MainActivity
+  /**
+   * Attempts to perform members-injection on {@code instance}, returning {@code true} if
+   * successful, {@code false} otherwise.
+   *
+   * @throws InvalidInjectorBindingException if the injector factory bound for a class does not
+   *     inject instances of that class
+   */
+  @CanIgnoreReturnValue
+  public boolean maybeInject(T instance) {
+    // injectorFactories为merge方法初始化得到的map，通过get(instance.getClass().getName())
+    // 得到Provider，那么对应我们的代码，这个factoryProvider是DaggerAppComponent.java中的mainActivitySubComponentFactoryProvider，
+    // 如果调用mainActivitySubComponentFactoryProvider.inject(instance)即完成依赖注入
+    Provider<AndroidInjector.Factory<?>> factoryProvider =
+        injectorFactories.get(instance.getClass().getName());
+    if (factoryProvider == null) {
+      return false;
+    }
+    // factory = factoryProvider.get()，这里获取到了mainActivitySubComponentFactoryProvider
+    @SuppressWarnings("unchecked")
+    AndroidInjector.Factory<T> factory = (AndroidInjector.Factory<T>) factoryProvider.get();
+    try {
+      // injector = factory.create(instance)，即返回了DaggerAppComponent.java中的MainActivitySubComponentImpl实例
+      AndroidInjector<T> injector =
+          checkNotNull(
+              factory.create(instance), "%s.create(I) should not return null.", factory.getClass());
+      // injector.inject(instance)，熟悉的味道，这里就是调用MainActivitySubComponentImpl.inject方法的最终位置
+      // 在这里完成了实际的依赖注入，前提是需要调用DispatchingAndroidInjector的inject方法(此处预留伏笔)
+      injector.inject(instance);
+      return true;
+    } catch (ClassCastException e) {
+      throw new InvalidInjectorBindingException(
+          String.format(
+              "%s does not implement AndroidInjector.Factory<%s>",
+              factory.getClass().getCanonicalName(), instance.getClass().getCanonicalName()),
+          e);
+    }
+  }
+// 倘若我们需要调用DispatchingAndroidInjector.inject方法，那么就执行了对instance的注入
+// 实际调用的是maybeInject方法
+  /**
+   * Performs members-injection on {@code instance}.
+   *
+   * @throws InvalidInjectorBindingException if the injector factory bound for a class does not
+   *     inject instances of that class
+   * @throws IllegalArgumentException if no {@link AndroidInjector.Factory} is bound for {@code
+   *     instance}
+   */
+  @Override
+  public void inject(T instance) {
+    boolean wasInjected = maybeInject(instance);
+    if (!wasInjected) {
+      throw new IllegalArgumentException(errorMessageSuggestions(instance));
+    }
+  }
+
+  /**
+   * Exception thrown if an incorrect binding is made for a {@link AndroidInjector.Factory}. If you
+   * see this exception, make sure the value in your {@code @ActivityKey(YourActivity.class)} or
+   * {@code @FragmentKey(YourFragment.class)} matches the type argument of the injector factory.
+   */
+  @Beta
+  public static final class InvalidInjectorBindingException extends RuntimeException {
+    InvalidInjectorBindingException(String message, ClassCastException cause) {
+      super(message, cause);
+    }
+  }
+
+  /** Returns an error message with the class names that are supertypes of {@code instance}. */
+  private String errorMessageSuggestions(T instance) {
+    List<String> suggestions = new ArrayList<>();
+    for (Class<?> clazz = instance.getClass(); clazz != null; clazz = clazz.getSuperclass()) {
+      if (injectorFactories.containsKey(clazz.getCanonicalName())) {
+        suggestions.add(clazz.getCanonicalName());
+      }
+    }
+
+    return suggestions.isEmpty()
+        ? String.format(NO_SUPERTYPES_BOUND_FORMAT, instance.getClass().getCanonicalName())
+        : String.format(
+            SUPERTYPES_BOUND_FORMAT, instance.getClass().getCanonicalName(), suggestions);
+  }
+}
+```
+
+```java
+// 接上文9
+public final class MyApplication_MembersInjector implements MembersInjector<MyApplication> {
+  private final Provider<DispatchingAndroidInjector<Activity>> dispatchingActivityInjectorProvider;
+
+  public MyApplication_MembersInjector(
+      Provider<DispatchingAndroidInjector<Activity>> dispatchingActivityInjectorProvider) {
+    this.dispatchingActivityInjectorProvider = dispatchingActivityInjectorProvider;
+  }
+
+  public static MembersInjector<MyApplication> create(
+      Provider<DispatchingAndroidInjector<Activity>> dispatchingActivityInjectorProvider) {
+    return new MyApplication_MembersInjector(dispatchingActivityInjectorProvider);
+  }
+
+  @Override
+  public void injectMembers(MyApplication instance) {
+    injectDispatchingActivityInjector(instance, dispatchingActivityInjectorProvider.get());
+  }
+// 9-1 调用injectDispatchingActivityInjector将DispatchingAndroidInjector注入到MyApplication中
+// 然后需要找到DispatchingAndroidInjector的inject方法是在哪里在什么时候被执行的，还记得最初的起点吗
+// MainActivity中的AndroidInjection.inject(this)，没错，我们回来了
+  public static void injectDispatchingActivityInjector(
+      MyApplication instance, DispatchingAndroidInjector<Activity> dispatchingActivityInjector) {
+    instance.dispatchingActivityInjector = dispatchingActivityInjector;
+  }
+}
+```
+
+```java
+// AndroidInjection.java
+  public static void inject(Activity activity) {
+    checkNotNull(activity, "activity");
+    Application application = activity.getApplication();
+    if (!(application instanceof HasActivityInjector)) {
+      throw new RuntimeException(
+          String.format(
+              "%s does not implement %s",
+              application.getClass().getCanonicalName(),
+              HasActivityInjector.class.getCanonicalName()));
+    }
+
+    AndroidInjector<Activity> activityInjector =
+        ((HasActivityInjector) application).activityInjector();
+    checkNotNull(activityInjector, "%s.activityInjector() returned null", application.getClass());
+// 之前我们一直没有明白为什么有AndroidInjector类，为什么要调用activityInjector.inject(activity)方法
+// 以及为什么需要HasActivityInjector接口,现在一切都清楚了
+// activityInjector即DispatchingAndroidInjector_Factory.newInstance方法返回的DispatchingAndroidInjector实例
+// 调用DispatchingAndroidInjector.inject会将DispatchingAndroidInjector_Factory.newInstance传入的Map的value中的
+// 实例注入到activity中
+    activityInjector.inject(activity);
+  }
+```
+
+至此，与依赖注入相关的自动生成的代码已经分析完毕了，整个注入的流程也明白了，但是还遗留了几个问题：
+
+1. 为什么要在自定义Application进行注入，以及为什么要实现接口HasActivityInjector？
+2. AppComponent的module为什么必须包含AndroidInjectionModule.class？
+3. MainActivitySubComponent为什么要继承AndroidInjector<MainActivity>，为什么要定义Factory继承AndroidInjector.Factory<MainActivity>？
+4. MainActivityModule的subcomponents为什么是MainActivitySubComponent.class，以及为什么要定义抽象方法bindMainActivityAndroidInjectorFactory？
+
+>  1. 为什么要在自定义Application进行注入，以及为什么要实现接口HasActivityInjector？
+
+仔细看AndroidInjection.inject(this)的源码不难知道，activityInjector是来自于application的，为什么要依靠application，
+因为当我们获取activityInjector时需要一个全局的类，其他Activity或者Fragment也能访问到，而且必须先于Activity或者Fragment被实例化，
+在整个应用启动过程中只有application符合。
+
+为什么需要实现HasActivityInjector，这是因为application目前只负责Activity的注入，需要DispatchingAndroidInjector<Activity>实例，
+而activityInjector方法可以返回这个实例，`DaggerAppComponent.create().inject(this);`会将DispatchingAndroidInjector实例注入到application中。
+
+> 2. AppComponent的module为什么必须包含AndroidInjectionModule.class？
+
+首先看看AndroidInjectionModule的内容，抽象类加上`@Multibinds`标注的抽象方法，但是看classKeyedInjectorFactories和stringKeyedInjectorFactories两个名字就知道了，在上面的代码DispatchingAndroidInjector.java中出现过。
+
+```java
+/**
+ * Contains bindings to ensure the usability of {@code dagger.android} framework classes. This
+ * module should be installed in the component that is used to inject the {@link
+ * android.app.Application} class.
+ */
+@Beta
+@Module
+public abstract class AndroidInjectionModule {
+  @Multibinds
+  abstract Map<Class<?>, AndroidInjector.Factory<?>> classKeyedInjectorFactories();
+
+  @Multibinds
+  abstract Map<String, AndroidInjector.Factory<?>> stringKeyedInjectorFactories();
+
+  private AndroidInjectionModule() {}
+}
+```
+
+MultiBinds只能用于标注抽象方法，它仅仅是告诉Component我有这么一种提供类型，让我们Component可以在Component中暴露Set或者Map类型的接口，但是不能包含具体的元素。
+
+
+
+components所依赖的所有module里不能有重复的@Provides方法（重载，或者同返回类型的），这里还包括后面讲到的依赖的其他的Component也不能有重复的，因为Dagger无法判断你究竟想要那个作为依赖（也就是依赖迷失）
 
 
 
