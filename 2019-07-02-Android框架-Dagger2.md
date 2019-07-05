@@ -407,7 +407,7 @@ public class ApiUtils extends AbstractUtils {
 
 ```java
 @Module
-public class DataUtilsModule {
+public class AbstractUtilsModule {
 
     @Provides
     AbstractUtils provideDataUtils() {
@@ -419,7 +419,7 @@ public class DataUtilsModule {
 修改Component代码
 
 ```java
-@Component(modules = DataUtilsModule.class)
+@Component(modules = AbstractUtilsModule.class)
 public interface MainActivityComponent {
     void inject(MainActivity activity);
 }
@@ -445,16 +445,16 @@ public class MainActivity extends AppCompatActivity {
 }
 ```
 
-通过修改`DataUtilsModule`中`provideDataUtils`方法返回的对象，我们可以控制抽象类的具体子类是DBUtils还是ApiUtils，而主题代码不需要改动。
+通过修改`AbstractUtilsModule`中`provideDataUtils`方法返回的对象，我们可以控制抽象类的具体子类是DBUtils还是ApiUtils，而主体代码不需要改动。
 
-此时代码分析包括`DaggerMainActivityComponent.java`、`DataUtilsModule_ProvideDataUtilsFactory.java`、``、``、`MainActivity_MembersInjector.java`
+此时代码分析包括`DaggerMainActivityComponent.java`、`AbstractUtilsModule_ProvideDataUtilsFactory.java`、`MainActivity_MembersInjector.java`
 
 ```java
 public final class DaggerMainActivityComponent implements MainActivityComponent {
-  private final DataUtilsModule dataUtilsModule;
+  private final AbstractUtilsModule AbstractUtilsModule;
 
-  private DaggerMainActivityComponent(DataUtilsModule dataUtilsModuleParam) {
-    this.dataUtilsModule = dataUtilsModuleParam;
+  private DaggerMainActivityComponent(AbstractUtilsModule abstractUtilsModuleParam) {
+    this.AbstractUtilsModule = abstractUtilsModuleParam;
   }
 
   public static Builder builder() {
@@ -464,17 +464,17 @@ public final class DaggerMainActivityComponent implements MainActivityComponent 
   public static MainActivityComponent create() {
     return new Builder().build();
   }
-// getDataUtils()返回的是
-// new DataUtils(DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule))
-// 构造函数的参数为DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule)
+// 2. getDataUtils()返回的是
+// new DataUtils(AbstractUtilsModule_ProvideDataUtilsFactory.provideDataUtils(AbstractUtilsModule))
+// 构造函数的参数为AbstractUtilsModule_ProvideDataUtilsFactory.provideDataUtils(AbstractUtilsModule)
 // 接下来看这个方法provideDataUtils的返回值
   private DataUtils getDataUtils() {
-    return new DataUtils(DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(dataUtilsModule));}
+    return new DataUtils(AbstractUtilsModule_ProvideDataUtilsFactory.provideDataUtils(AbstractUtilsModule));}
 
   @Override
   public void inject(MainActivity activity) {
     injectMainActivity(activity);}
-// 直接看核心代码，MainActivity_MembersInjector.injectDataUtils(instance, getDataUtils())
+// 1. 直接看核心代码，MainActivity_MembersInjector.injectDataUtils(instance, getDataUtils())
 // 根据getDataUtils方法的返回值可知，其返回的是DataUtils实例
 // MainActivity_MembersInjector.injectDataUtils方法也是很熟悉，同上
   private MainActivity injectMainActivity(MainActivity instance) {
@@ -483,31 +483,31 @@ public final class DaggerMainActivityComponent implements MainActivityComponent 
   }
 
   public static final class Builder {
-    private DataUtilsModule dataUtilsModule;
+    private AbstractUtilsModule AbstractUtilsModule;
 
     private Builder() {
     }
 
-    public Builder dataUtilsModule(DataUtilsModule dataUtilsModule) {
-      this.dataUtilsModule = Preconditions.checkNotNull(dataUtilsModule);
+    public Builder AbstractUtilsModule(AbstractUtilsModule AbstractUtilsModule) {
+      this.AbstractUtilsModule = Preconditions.checkNotNull(AbstractUtilsModule);
       return this;
     }
 
     public MainActivityComponent build() {
-      if (dataUtilsModule == null) {
-        this.dataUtilsModule = new DataUtilsModule();
+      if (AbstractUtilsModule == null) {
+        this.AbstractUtilsModule = new AbstractUtilsModule();
       }
-      return new DaggerMainActivityComponent(dataUtilsModule);
+      return new DaggerMainActivityComponent(AbstractUtilsModule);
     }
   }
 }
 ```
 
 ```java
-public final class DataUtilsModule_ProvideDataUtilsFactory implements Factory<AbstractUtils> {
-  private final DataUtilsModule module;
+public final class AbstractUtilsModule_ProvideDataUtilsFactory implements Factory<AbstractUtils> {
+  private final AbstractUtilsModule module;
 
-  public DataUtilsModule_ProvideDataUtilsFactory(DataUtilsModule module) {
+  public AbstractUtilsModule_ProvideDataUtilsFactory(AbstractUtilsModule module) {
     this.module = module;
   }
 
@@ -516,24 +516,595 @@ public final class DataUtilsModule_ProvideDataUtilsFactory implements Factory<Ab
     return provideDataUtils(module);
   }
 
-  public static DataUtilsModule_ProvideDataUtilsFactory create(DataUtilsModule module) {
-    return new DataUtilsModule_ProvideDataUtilsFactory(module);
+  public static AbstractUtilsModule_ProvideDataUtilsFactory create(AbstractUtilsModule module) {
+    return new AbstractUtilsModule_ProvideDataUtilsFactory(module);
   }
-// 上述代码直接调用的是下面这个方法，返回的是DataUtilsModule.provideDataUtils()
-// DataUtilsModule根据我们定义的时候可知，provideDataUtils返回的是new DBUtils()对象
-  public static AbstractUtils provideDataUtils(DataUtilsModule instance) {
+// 3. 上述代码直接调用的是下面这个方法，返回的是AbstractUtilsModule.provideDataUtils()
+// AbstractUtilsModule根据我们定义的时候可知，provideDataUtils返回的是new DBUtils()对象
+  public static AbstractUtils provideDataUtils(AbstractUtilsModule instance) {
     return Preconditions.checkNotNull(instance.provideDataUtils(), "Cannot return null from a non-@Nullable @Provides method");
   }
 }
 ```
 
+`@Module`的含义是 通知Component，可以从我这里获取到构造好的对象；
+
+`@Provide`通常是在标记了`@Module`的类中用于标记返回实例的方法，根据我们的使用以及代码分析来看，实例的注入是根据类型自动判断的，也就是说，从MainActivity到Module的实例传递过程中，同一Module中同一类型的provide方法只能存在一个，否则就会报错，比如我们如果在AbstractUtilsModule中再加入一个provideDataUtils2方法，同样返回类型为AbstractUtils，那么MainActivity中的dataUtils就会遇到`依赖迷失`的问题，这两个方法返回一样，那该用哪一个，于是报错，此时可以通过`限定符`，也就是下文介绍的`@Qualifier`和`@Named`来区分。
+
 ### 1.3 @Qualifier和@Named
 
+直接上代码，首先是AbstractUtilsModule，通过添加`@Named`并指定一个字符来区别不同的实例，注意这里的方法名其实作用不大，完全依靠限定符区分，这里两个provide方法分别返回之前的两个AbstractUtils的子类DBUtils和ApiUtils。
+
+```java
+@Module
+public class AbstractUtilsModule {
+
+    @Provides
+    @Named("DBUtils")
+    AbstractUtils provideDBUtils() {
+        return new DBUtils();
+    }
+
+
+    @Provides
+    @Named("ApiUtils")
+    AbstractUtils provideApiUtils() {
+        return new ApiUtils();
+    }
+}
+```
+
+同时，需要修改DataUtils类，因为AbstractUtilsModule表示我们可以提供两种AbstractUtils，你到底要哪个的实例，此时需要在DataUtils构造函数的参数中加上`@Named`注解，与上面对应，表示我需要哪一种AbstractUtils
+
+```java
+public class DataUtils {
+
+    private AbstractUtils abstractUtils;
+
+    @Inject
+    public DataUtils(@Named("ApiUtils") AbstractUtils abstractUtils) {
+        this.abstractUtils = abstractUtils;
+    }
+
+    public String show() {
+        return abstractUtils.showMessage();
+    }
+}
+```
+
+其他代码不用修改，此时MainActivity中`dataUtils.show()`自然用的是ApiUtils。
+
+`@Qualifier`的作用与`@Named`的作用差不多，但是不需要自定义字符串，使用`@Qualifier`时不是直接用，而是通过`@Qualifier`自定义限定符
+
+```java
+@Qualifier
+@Retention(RetentionPolicy.RUNTIME)
+public @interface DBDataUtils {
+}
+```
+
+```java
+@Qualifier
+@Retention(RetentionPolicy.RUNTIME)
+public @interface ApiDataUtils {
+}
+```
+
+`RetentionPolicy.RUNTIME`代表注解会保存在.class文件，虚拟机会在运行时保留，具体有什么区别，暂时还不清楚。
+
+需要修改的地方有两处，一是AbstractUtilsModule，二是DataUtils，都是将`@Named`注解修改为自定义的限定符注解，此时Log结果变为DBUtils
+
+```java
+@Module
+public class AbstractUtilsModule {
+
+    @Provides
+    @DBDataUtils
+    AbstractUtils provideDBUtils() {
+        return new DBUtils();
+    }
+
+
+    @Provides
+    @ApiDataUtils
+    AbstractUtils provideApiUtils() {
+        return new ApiUtils();
+    }
+}
+```
+
+```java
+public class DataUtils {
+
+    private AbstractUtils abstractUtils;
+
+    @Inject
+    public DataUtils(@DBDataUtils AbstractUtils abstractUtils) {
+        this.abstractUtils = abstractUtils;
+    }
+
+    public String show() {
+        return abstractUtils.showMessage();
+    }
+}
+```
+
+在上面的代码中我们对DataUtils的构造方法进行Inject注解，这样的操作不是很合适，因为需要尽量少对实体类进行额外的修改，所以我们同样可以通过Module的方式provide一个DataUtils的对象，并在Module中对DataUtils的构造进行约束
+
+```java
+// 删掉Inject注解和限定符注解
+public class DataUtils {
+
+    private AbstractUtils abstractUtils;
+
+    public DataUtils(AbstractUtils abstractUtils) {
+        this.abstractUtils = abstractUtils;
+    }
+
+    public String show() {
+        return abstractUtils.showMessage();
+    }
+}
+```
+
+新建一个DataUtilsModule用于提供DataUtils对象
+
+```java
+@Module
+public class DataUtilsModule {
+
+    @Provides
+    DataUtils provideDataUtils(@ApiDataUtils AbstractUtils abstractUtils) {
+        return new DataUtils(abstractUtils);
+    }
+}
+```
+
+修改MainActivityComponent的modules参数，增加DataUtilsModule.class
+
+```java
+@Component(modules = {AbstractUtilsModule.class, DataUtilsModule.class})
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+最后编译运行，log结果是ApiUtils，根据上述代码的运行，我们能够总结出一些运行的规则：
+
+1. 首先当我们在MainActivity中调用inject方法时，其实是通过MainActivityComponent询问，可以去哪里找到我们需要的实例；
+2. MainActivityComponent定义了`modules = {AbstractUtilsModule.class, DataUtilsModule.class}`，告诉系统去这两个类中找；
+3. AbstractUtilsModule告诉系统我这里只能提供限定类型的AbstractUtils，DataUtilsModule告诉系统我这里可以提供DataUtils，这各类型恰好与MainActivity需要的实例类型相同，于是系统到DataUtilsModule的provide方法去找；
+4. 此时系统发现DataUtilsModule的provide方法是带参数AbstractUtils的，而且还有限定符，那么同样需要能够提供AbstractUtils的Module，这不是恰好与第3步的AbstractUtilsModule相同吗，那么就按照参数限定符找到AbstractUtilsModule的对应provide方法，结果发现它可以直接返回new ApiUtils()对象，正合我心，且不需要继续走下去，那么实例化完成。
+
+在寻找实例的路线中需要用到的Module都必须加在Component中的modules参数中，否则这条路线走不通（DataUtilsModule -> AbstractUtilsModule），存在的问题是你需要知道所有路线上的Module并且将其加入到Component中，显然对于多级依赖产生的多个Module这是不合适的。
+
+
+
+### 1.4 @Component的dependence和@SubComponent
+
+Component除了可以提供inject方法以外还可以像Module一样提供实例，这样便于解决多级依赖导致的Module增加问题。
+
+首先创建提供ApiUtils和DBUtils实例的Component，其`modules = AbstractUtilsModule.class`，表明最终方法获取实例还是从Module拿到的，我Component只是交接一下，向外提供接口getDBUtils和getApiUtils
+
+```java
+// 同理这里的两个方法也需要限定符注解，表明需要从AbstractUtilsModule拿哪种实例，一般命名get+XXXEntity
+@Component(modules = AbstractUtilsModule.class)
+public interface AbstractUtilsComponent {
+
+    @DBDataUtils
+    AbstractUtils getDBUtils();
+
+    @ApiDataUtils
+    AbstractUtils getApiUtils();
+
+}
+```
+
+然后我们的MainActivity是需要DataUtils的实例，那么我们也需要提供DataUtils的Component
+
+```java
+// modules = DataUtilsModule.class表明实例来源于DataUtilsModule
+// dependencies = AbstractUtilsComponent.class表明我们可能需要AbstractUtilsComponent提供的实例
+// 逻辑上也是对应的DataUtilsModule返回实例需要限定AbstractUtils，AbstractUtilsComponent恰好可以提供
+// 根据1.3的最后部分我们知道这里的dependencies = AbstractUtilsComponent.class可以替换为AbstractUtilsModule，
+// 但是这样会失去依赖的层层分离的特点
+@Component(modules = DataUtilsModule.class, dependencies = AbstractUtilsComponent.class)
+public interface DataUtilsComponent {
+    DataUtils getDataUtils();
+}
+```
+
+其次需要修改MainActivityComponent的参数，这里可以发现不再使用modules参数二是dependencies
+
+```java
+// dependencies = DataUtilsComponent.class表明可能需要DataUtilsComponent提供的实例，
+// 通过上面定义的getDataUtils方法得到
+@Component(dependencies = DataUtilsComponent.class)
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+最后需要修改MainActivity调用inject的流程，其他代码不变
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    DataUtils dataUtils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        // 可以发现调用流程变复杂了，而且恰好在Component加入了dependencies的位置
+        // 需要调用dataUtilsComponent或者abstractUtilsComponent来进行初始化，
+        // 有人会说了，这不是把流程变复杂了吗，之前都不需要额外的参数，现在需要将生成的Component带入
+        // 到初始化的过程，非也非也，此处可以使用DaggerDataUtilsComponent，那当然可以使用继承自DataUtilsComponent
+        // 的其他Component，也就是说我们增加了注入的依赖范围，变为可以动态修改的了，注入过程更加灵活
+        DaggerMainActivityComponent
+                .builder()
+                .dataUtilsComponent(DaggerDataUtilsComponent
+                        .builder()
+                        .abstractUtilsComponent(DaggerAbstractUtilsComponent.create())
+                        .build())
+                .build()
+                .inject(this);
+
+        // 很显然，这里引入的是ApiUtils对象
+        Log.i(TAG, dataUtils.show());
+    }
+}
+```
+
+下面展示一下为什么说注入的方式变得灵活了，产品经理突然告诉你需要新增一个Utils叫做ExtraUtils，在MainActivity中需要使用
+
+```java
+public class ExtraUtils extends AbstractUtils {
+    @Override
+    public String showMessage() {
+        return "This is ExtraUtils";
+    }
+}
+```
+
+在不修改上述的大部分代码的条件下，如何将ExtraUtils注入，首先新建一个ExtraDataUtilsModule用于提供通过ExtraUtils构造的DataUtils
+
+```java
+// 这里没有用带参的构造方法，也没有用抽象类，直接实例化，便于演示
+@Module
+public class ExtraDataUtilsModule{
+  
+    @Provides
+    DataUtils provideDataUtils() {
+        return new DataUtils(new ExtraUtils());
+    }
+}
+```
+
+然后新建一个ExtraDataUtilsComponent用于提供DataUtils实例，是不是和DataUtilsComponent功能很像，没错，这里可以用继承，并且由于MainActivityComponent的`dependencies = DataUtilsComponent.class`不变，我用继承来实现即可
+
+```java
+// 这里的modules = ExtraDataUtilsModule.class变成了我们自己新定义的Module，它是直接返回new DataUtils(new ExtraUtils())，
+// 所以实际上后面的dependencies = AbstractUtilsComponent.class不需要，但是这里保留是为了减少修改MainActivity的代码，当然也可以去掉
+@Component(modules = ExtraDataUtilsModule.class, dependencies = AbstractUtilsComponent.class)
+public interface ExtraDataUtilsComponent extends DataUtilsComponent{
+}
+```
+
+最后修改MainActivity中的inject流程
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    DataUtils dataUtils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        // 注意这里是DaggerExtraDataUtilsComponent，即新创建的Component
+        // 而且abstractUtilsComponent是可以去掉的，同理ExtraDataUtilsComponent的dependencies也需要去掉
+        DaggerMainActivityComponent
+                .builder()
+                .dataUtilsComponent(DaggerExtraDataUtilsComponent
+                        .builder()
+                        .abstractUtilsComponent(DaggerAbstractUtilsComponent.create())
+                        .build())
+                .build()
+                .inject(this);
+
+        // 很显然，这里引入的是ExtraUtils对象
+        Log.i(TAG, dataUtils.show());
+    }
+}
+```
+
+通过这样的方式进行额外的依赖注入，就可以避免大部分代码的重构，而仅仅是增加代码，且注入的方式变得灵活
+
+从源码中也可以看到dependencies的作用，以MainActivityComponent为代表
+
+```java
+public final class DaggerMainActivityComponent implements MainActivityComponent {
+  private final DataUtilsComponent dataUtilsComponent;
+
+  private DaggerMainActivityComponent(DataUtilsComponent dataUtilsComponentParam) {
+    this.dataUtilsComponent = dataUtilsComponentParam;
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  @Override
+  public void inject(MainActivity activity) {
+    injectMainActivity(activity);
+  }
+
+// 我们可以调用DataUtilsComponent的getDataUtils()方法了
+  private MainActivity injectMainActivity(MainActivity instance) {
+    MainActivity_MembersInjector.injectDataUtils(
+        instance,
+        Preconditions.checkNotNull(
+            dataUtilsComponent.getDataUtils(),
+            "Cannot return null from a non-@Nullable component method"));
+    return instance;
+  }
+
+  public static final class Builder {
+    private DataUtilsComponent dataUtilsComponent;
+
+    private Builder() {}
+// 此处为区别，初始化的过程中增加了dataUtilsComponent方法，用于引入DataUtilsComponent
+    public Builder dataUtilsComponent(DataUtilsComponent dataUtilsComponent) {
+      this.dataUtilsComponent = Preconditions.checkNotNull(dataUtilsComponent);
+      return this;
+    }
+
+    public MainActivityComponent build() {
+      Preconditions.checkBuilderRequirement(dataUtilsComponent, DataUtilsComponent.class);
+      return new DaggerMainActivityComponent(dataUtilsComponent);
+    }
+  }
+}
+```
+
+以上就是`@Component`的部分使用，包括dependencies参数的意义，与之相似的有`@Subcomponent`注解，让我们回到加入ExtraUtils之前的场景，用`@Subcomponent`实现Componet的的层层依赖。
+
+首先修改AbstractUtilsComponent，增加它的上一级Component的plus方法，参数为上一级Component的Module
+
+```java
+@Component(modules = AbstractUtilsModule.class)
+public interface AbstractUtilsComponent {
+
+//    @DBDataUtils
+//    AbstractUtils getDBUtils();
+//
+//    @ApiDataUtils
+//    AbstractUtils getApiUtils();
+
+    DataUtilsComponent plus(DataUtilsModule dataUtilsModule);
+
+}
+```
+
+然后修改DataUtilsComponent，同理，但是修改注解为`@Subcomponent`，且删除了dependencies参数
+
+```java
+@Subcomponent(modules = DataUtilsModule.class)
+public interface DataUtilsComponent {
+    //    DataUtils getDataUtils();
+    MainActivityComponent plus();
+}
+```
+
+其次是MainActivityComponent，同理，修改注解为`@Subcomponent`，且删除了dependencies参数
+
+```java
+@Subcomponent()
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+最后修改MainActivity
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    DataUtils dataUtils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        // 此处的注入调用的流程发生了很大的变化
+        // 之前是从MainActivityComponent -> DataUtilsComponent -> AbstractUtilsComponent
+        // 现在是AbstractUtilsComponent -> DataUtilsComponent -> MainActivityComponent
+        // 并且传入的参数变成了Module，这里也增加了注入的灵活性
+        DaggerAbstractUtilsComponent
+                .create()
+                .plus(new DataUtilsModule())
+                .plus()
+                .inject(this);
+
+        // 很显然，这里引入的是ApiUtils对象
+        Log.i(TAG, dataUtils.show());
+    }
+}
+```
+
+从生成的代码不难发现，这次只有一个Component生成文件`DaggerAbstractUtilsComponent.java`，我们看看为什么会这样
+
+```java
+// 还是按照执行顺序分析
+public final class DaggerAbstractUtilsComponent implements AbstractUtilsComponent {
+  private final AbstractUtilsModule abstractUtilsModule;
+// 3. 构造函数初始化完成
+  private DaggerAbstractUtilsComponent(AbstractUtilsModule abstractUtilsModuleParam) {
+    this.abstractUtilsModule = abstractUtilsModuleParam;
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+// 1. 返回Builder().build()
+  public static AbstractUtilsComponent create() {
+    return new Builder().build();
+  }
+// 4. 执行plus(new DataUtilsModule())方法，返回DataUtilsComponentImpl(dataUtilsModule)
+  @Override
+  public DataUtilsComponent plus(DataUtilsModule dataUtilsModule) {
+    Preconditions.checkNotNull(dataUtilsModule);
+    return new DataUtilsComponentImpl(dataUtilsModule);
+  }
+
+  public static final class Builder {
+    private AbstractUtilsModule abstractUtilsModule;
+
+    private Builder() {}
+
+    public Builder abstractUtilsModule(AbstractUtilsModule abstractUtilsModule) {
+      this.abstractUtilsModule = Preconditions.checkNotNull(abstractUtilsModule);
+      return this;
+    }
+// 2. 初始化了abstractUtilsModule为AbstractUtilsModule，这肯定是AbstractUtilsComponent指定了modules参数
+// 导致，然后返回DaggerAbstractUtilsComponent的构造函数
+    public AbstractUtilsComponent build() {
+      if (abstractUtilsModule == null) {
+        this.abstractUtilsModule = new AbstractUtilsModule();
+      }
+      return new DaggerAbstractUtilsComponent(abstractUtilsModule);
+    }
+  }
+
+  private final class DataUtilsComponentImpl implements DataUtilsComponent {
+    private final DataUtilsModule dataUtilsModule;
+// 5. 初始化DataUtilsComponentImpl
+    private DataUtilsComponentImpl(DataUtilsModule dataUtilsModuleParam) {
+      this.dataUtilsModule = dataUtilsModuleParam;
+    }
+// 10. DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils，接下来看DataUtilsModule_ProvideDataUtilsFactory
+// 和AbstractUtilsModule_ProvideApiUtilsFactory
+    private DataUtils getDataUtils() {
+      return DataUtilsModule_ProvideDataUtilsFactory.provideDataUtils(
+          dataUtilsModule,
+          AbstractUtilsModule_ProvideApiUtilsFactory.provideApiUtils(
+              DaggerAbstractUtilsComponent.this.abstractUtilsModule));
+    }
+// 6. 调用plus()方法，返回的是MainActivityComponentImpl
+    @Override
+    public MainActivityComponent plus() {
+      return new MainActivityComponentImpl();
+    }
+
+    private final class MainActivityComponentImpl implements MainActivityComponent {
+// 7. MainActivityComponentImpl()构造
+      private MainActivityComponentImpl() {}
+// 8. 调用inject方法
+      @Override
+      public void inject(MainActivity activity) {
+        injectMainActivity(activity);
+      }
+// 9. 最终调用的位置injectDataUtils，这个很熟悉了，instance.dataUtils = DataUtilsComponentImpl.this.getDataUtils()
+// getDataUtils返回值是什么呢，看10
+      private MainActivity injectMainActivity(MainActivity instance) {
+        MainActivity_MembersInjector.injectDataUtils(
+            instance, DataUtilsComponentImpl.this.getDataUtils());
+        return instance;
+      }
+    }
+  }
+}
+```
+
+```java
+public final class DataUtilsModule_ProvideDataUtilsFactory implements Factory<DataUtils> {
+  private final DataUtilsModule module;
+
+  private final Provider<AbstractUtils> abstractUtilsProvider;
+
+  public DataUtilsModule_ProvideDataUtilsFactory(
+      DataUtilsModule module, Provider<AbstractUtils> abstractUtilsProvider) {
+    this.module = module;
+    this.abstractUtilsProvider = abstractUtilsProvider;
+  }
+
+  @Override
+  public DataUtils get() {
+    return provideDataUtils(module, abstractUtilsProvider.get());
+  }
+
+  public static DataUtilsModule_ProvideDataUtilsFactory create(
+      DataUtilsModule module, Provider<AbstractUtils> abstractUtilsProvider) {
+    return new DataUtilsModule_ProvideDataUtilsFactory(module, abstractUtilsProvider);
+  }
+// 11-1. 接上文10，instance.provideDataUtils即我们定义的DataUtilsModule.provideDataUtils，返回DataUtils实例
+  public static DataUtils provideDataUtils(DataUtilsModule instance, AbstractUtils abstractUtils) {
+    return Preconditions.checkNotNull(
+        instance.provideDataUtils(abstractUtils),
+        "Cannot return null from a non-@Nullable @Provides method");
+  }
+}
+```
+
+```java
+public final class AbstractUtilsModule_ProvideApiUtilsFactory implements Factory<AbstractUtils> {
+  private final AbstractUtilsModule module;
+
+  public AbstractUtilsModule_ProvideApiUtilsFactory(AbstractUtilsModule module) {
+    this.module = module;
+  }
+
+  @Override
+  public AbstractUtils get() {
+    return provideApiUtils(module);
+  }
+
+  public static AbstractUtilsModule_ProvideApiUtilsFactory create(AbstractUtilsModule module) {
+    return new AbstractUtilsModule_ProvideApiUtilsFactory(module);
+  }
+// 11-2. 接上文10，instance.provideApiUtils即我们定义的AbstractUtilsModule.provideApiUtils，返回ApiUtils实例
+  public static AbstractUtils provideApiUtils(AbstractUtilsModule instance) {
+    return Preconditions.checkNotNull(
+        instance.provideApiUtils(), "Cannot return null from a non-@Nullable @Provides method");
+  }
+}
+```
+
+分析两种调用方式的逻辑可以知道：
+
+1. dependencies方式从最上级的Component一级一级往下调用，获取需要的实例；Subcomponent方式最下级的Component通过一步一步构造出上级Component来调用，在每一步的plus方法中中加入Module提供需要的实例；
+2. dependencies方式适用于需要在某个类中注入非常多的其他实例，通过dependencies参数加深；Subcomponent方式适用于将某一个实例提供给其他实例注入，比如将Application context给其他例如ToastUtils、SharedpreferencesUtils使用，Application context作为Component，其他作为Subcomponent；
+3. Component dependencies 能单独使用，而Subcomponent必须由Component调用方法获取；
+4. Component dependencies 可以很清楚的得知他依赖哪个Component， 而Subcomponent不知道它自己的谁的孩子。
+
+**Component dependencies和Subcomponent使用上的总结**
+
+Component Dependencies：
+
+1. 你想保留独立的想个组件（Flower可以单独使用注入，Pot也可以）
+2. 要明确的显示该组件所使用的其他依赖
+
+Subcomponent：
+
+1. 两个组件之间的关系紧密
+2. 你只关心Component，而Subcomponent只是作为Component的拓展，可以通过Component.xxx调用。
+
+### 1.5 @Scope和@Singleton
+
+`@Scope`是用来管理依赖的生命周期的。它和`@Qualifier`一样是用来自定义注解的，而`@Singleton`则是`@Scope`的默认实现。
 
 
 
 
 
+### 1.6
 
 
 ## dagger.android
