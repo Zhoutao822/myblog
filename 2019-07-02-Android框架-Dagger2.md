@@ -1100,11 +1100,357 @@ Subcomponent：
 
 `@Scope`是用来管理依赖的生命周期的。它和`@Qualifier`一样是用来自定义注解的，而`@Singleton`则是`@Scope`的默认实现。
 
+在没有引入`@Scope`时，我们在MainActivity中初始化另一个DataUtils会是什么情况，这两个DataUtils会是相同的吗
+
+```java
+public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = MainActivity.class.getSimpleName();
+// 这里直接inject第二个dataUtils2
+    @Inject
+    DataUtils dataUtils;
+
+    @Inject
+    DataUtils dataUtils2;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        TextView textView = findViewById(R.id.text);
+
+        DaggerMainActivityComponent
+                .builder()
+                .dataUtilsComponent(DaggerDataUtilsComponent
+                        .builder()
+                        .abstractUtilsComponent(DaggerAbstractUtilsComponent.create())
+                        .build())
+                .build()
+                .inject(this);
+
+        // 然后在Log中打印这两个DataUtils对象，结果是这两个对象是不同的，相当于重新new一个
+        Log.i(TAG, dataUtils.toString() + dataUtils2.toString());
+
+        textView.setText(dataUtils.show());
+    }
+}
+```
+
+一般而言，我们希望这种工具类Utils是单例模式，比如读写数据库的时候，如果不是单例，那么可能存在“读后写”等问题导致数据不同步，那么单例模式，特别是全局单例就显得非常好用了。
+
+怎样在dagger框架中使用单例，很显然，必定是通过注解来实现`@Singleton`，在上面的代码中，我们需要的单例是DataUtils，那么从DataUtils的注入过程开始，首先是DataUtilsModule
+
+```java
+// 在provide方法上加上@Singleton
+@Module
+public class DataUtilsModule {
+
+    @Provides
+    @Singleton
+    DataUtils provideDataUtils(@ApiDataUtils AbstractUtils abstractUtils) {
+        return new DataUtils(abstractUtils);
+    }
+}
+```
+
+以及需要使用此module的Component也需要加上
+
+```java
+@Singleton
+@Component(modules = DataUtilsModule.class, dependencies = AbstractUtilsComponent.class)
+public interface DataUtilsComponent {
+    DataUtils getDataUtils();
+}
+```
+
+dagger2还有一项规定，如果一个Component被加上了`@Scope`注解，类似`@Singleton`，那么依赖这个Component的Component也需要加上`@Scope`注解，比如这里的MainActivityComponent，但是如果直接在MainActivityComponent上加上`@Singleton`会报错`error: This @Singleton component cannot depend on scoped components: @Singleton com.example.daggerdemo.di.component.DataUtilsComponent`，即单例不能依赖于单例，这是因为单例只能由自己产生，如果DataUtils在其他地方被注入了，那么MainActivityComponent将无法再进行注入，因为其依赖DataUtils是单例模式，显然这不是很符合面向对象的设计原则，因为我们可能并不知道MainActivityComponent会依赖哪些单例，所以MainActivityComponent的`@Scope`可以使用自定义的注解，自定义`@Scope`与`@Singleton`有说明区别呢，`@Singleton`相当于告诉系统，这个对象或者这个方法必定是全局单例，你看着办；而自定义`@Scope`相当于告诉系统在这个注解标注过的地方，我提供的对象是唯一的。
+
+因此代码如下，自定义ActivityScope表明我们需要在Activity生命周期内实现单例
+
+```java
+@Scope
+@Retention(RetentionPolicy.RUNTIME)
+public @interface ActivityScope {}
+```
+
+MainActivityComponent注解加上`@ActivityScope`，其他地方的`@Singleton`不变
+
+```java
+@ActivityScope
+@Component(dependencies = DataUtilsComponent.class)
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+最后运行代码可以发现MainActivity中的两个DataUtils对象是相同的，也就是在MainActivity中是单例的，但是它是不是全局单例呢，我们在创建一个SecondActivity，同样注入DataUtils
+
+```java
+public class SecondActivity extends AppCompatActivity {
+
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    DataUtils dataUtils3;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_second);
+        TextView textView = findViewById(R.id.text);
+
+        DaggerSecondActivityComponent
+                .builder()
+                .dataUtilsComponent(DaggerDataUtilsComponent
+                        .builder()
+                        .abstractUtilsComponent(DaggerAbstractUtilsComponent.create())
+                        .build())
+                .build()
+                .inject(this);
+        // 此时dataUtils3与dataUtils并不相同，也就说dataUtils仅在MainActivity中是单例
+        Log.i(TAG, dataUtils3.toString());
+
+
+        textView.setText(dataUtils3.show());
+    }
+}
+
+// 同理需要一个SecondActivityComponent
+@ActivityScope
+@Component(dependencies = DataUtilsComponent.class)
+public interface SecondActivityComponent {
+    void inject(SecondActivity activity);
+
+}
+```
+
+`@Scope`是需要成对存在的，在Module的Provide方法中使用了`@Scope`，那么对应的Component中也必须使用`@Scope`注解，当两边的`@Scope`名字一样时（比如同为`@Singleton`）, 那么该Provide方法提供的依赖将会在Component中保持“局部单例”。
+而在Component中标注`@Scope`，provide方法没有标注，那么这个`@Scope`就不会起作用，而Component上的`@Scope`的作用也只是为了能顺利通过编译，就像我刚刚定义的ActivityScope一样。
+
+`@Singleton`也是一个自定义`@Scope`，它的作用就像上面说的一样。但由于它是Dagger2中默认定义的，所以它比我们自定义Scope对了一个功能，就是编译检测，防止我们不规范的使用Scope注解，仅此而已。
+
+如何使用Dagger2实现单例呢：
+
+1. 依赖在Component中是单例的（供该依赖的provide方法和对应的Component类使用同一个Scope注解。）
+2. 对应的Component在App中只初始化一次，每次注入依赖都使用这个Component对象。（在Application中创建该Component）
+
+最直接的就是在自定义Application中将Component先初始化了，在通过这个Component去注入我们需要的对象，由于Component是单例的，因此通过它注入的对象也就是单例。
+
+```java
+public class MyApp extends Application {
+// 注意我们之前定义的DataUtilsComponent有@Singleton注解，DataUtilsModule的provide方法有@Singleton注解
+// 因此在Application中初始化的是DataUtilsComponent，这里简单使用DaggerDataUtilsComponent构造，当然也可以通过dagger注入
+    private DataUtilsComponent dataUtilsComponent;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        dataUtilsComponent = DaggerDataUtilsComponent
+                .builder()
+                .abstractUtilsComponent(DaggerAbstractUtilsComponent.create())
+                .build();
+    }
+
+    public DataUtilsComponent getDataUtilsComponent() {
+        return dataUtilsComponent;
+    }
+}
+```
+
+然后修改MainActivity和SecondActivity中inject的流程
+
+```java
+// MainActivity.java，dataUtilsComponent的参数是Application中初始化的
+        DaggerMainActivityComponent
+                .builder()
+                .dataUtilsComponent(((MyApp) getApplication()).getDataUtilsComponent())
+                .build()
+                .inject(this);
+// SecondActivity.java
+        DaggerSecondActivityComponent
+                .builder()
+                .dataUtilsComponent(((MyApp) getApplication()).getDataUtilsComponent())
+                .build()
+                .inject(this);                
+```
+
+然后我们看到在MainActivity和SecondActivity中的三个DataUtils都是相同的了。
+
+`@Scope`是用来给开发者管理依赖的生命周期的，它可以让某个依赖在Component中保持 “局部单例”（唯一），如果将Component保存在Application中复用，则可以让该依赖在app中保持单例。 我们可以通过自定义不同的Scope注解来标记这个依赖的生命周期，所以命名是需要慎重考虑的。
+
+* `@Singleton`告诉我们这个依赖是单例的
+* `@ActivityScope`告诉我们这个依赖的生命周期和Activity相同
+* `@FragmentScope`告诉我们这个依赖的生命周期和Fragment相同
+* `@xxxxScope` ……
+
+以上就是如何使用自定义`@Scope`实现单例的过程，那么如果在Application中使用注入会是什么情况呢，我们将DataUtilsComponent注入到MyApp中
+
+```java
+// 虽然这样的注入过程不是很合适，但是基本流程与在Activity中相同，首先是Module，提供对象实例
+@Module
+public class DataUtilsComponentModule {
+    @Provides
+    DataUtilsComponent provideDataUtilsComponent(){
+        return DaggerDataUtilsComponent
+                .builder()
+                .abstractUtilsComponent(DaggerAbstractUtilsComponent.create())
+                .build();
+    }
+}
+
+// 然后是Component，提供注入的方法以及被注入的位置
+@Component(modules = DataUtilsComponentModule.class)
+public interface ApplicationComponent {
+    void inject(MyApp myApp);
+}
+
+public class MyApp extends Application {
+
+    @Inject
+    DataUtilsComponent dataUtilsComponent;
+// 最后是在Application的onCreate方法中注入
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        DaggerApplicationComponent
+                .builder()
+                .build()
+                .inject(this);
+    }
+
+    public DataUtilsComponent getDataUtilsComponent() {
+        return dataUtilsComponent;
+    }
+}
+```
+
+### 1.6 @MapKey和@Lazy
+
+`@MapKey`用于定义一些依赖集合（比如Map和Set），它的使用很简单，可以看代码注释
+
+首先需要定义key注解
+
+```java
+// UtilsMapKey作为后续使用的注解，String代表这个注解的接受的类型为String
+// unwrapValue如果为true，则此注解可接受的key类型有基本类型包装类、String、classes
+// unwrapValue如果为false，则此注解可接受的key类型为其本身，这个例子可以在源码注释中找到
+@MapKey(unwrapValue = true)
+public @interface UtilsMapKey {
+    String value();
+}
+```
+
+然后是提供Map的value数据的module
+
+```java
+@Module
+public class UtilsMapModule {
+  // 这里首先是Provides注解，然后是IntoMap注解，最后是前面定义的MapKey注解，同时传入了Map的key值为thisiskey
+    @Provides
+    @IntoMap
+    @UtilsMapKey("thisiskey")
+    Integer provideUtilsMapValue(){
+      // 返回值即为value，虽然返回值为value，但实际上注入时传入的是整个Map
+        return 11;
+    }
+}
+```
+
+其次是MainActivityComponent加上我们定义的module
+
+```java
+@ActivityScope
+@Component(dependencies = DataUtilsComponent.class, modules = UtilsMapModule.class)
+public interface MainActivityComponent {
+    void inject(MainActivity activity);
+}
+```
+
+最后直接在MainActivity中使用即可
+
+```java
+public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    DataUtils dataUtils;
+
+    @Inject
+    DataUtils dataUtils2;
+
+    @Inject
+    Map<String, Integer> map;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        TextView textView = findViewById(R.id.text);
+
+        DaggerMainActivityComponent
+                .builder()
+                .dataUtilsComponent(((MyApp) getApplication()).getDataUtilsComponent())
+                .build()
+                .inject(this);
+
+        // 很显然，这里引入的是ApiUtils对象
+        Log.i(TAG, dataUtils.toString() + dataUtils2.toString());
+        Log.i(TAG, String.valueOf(dataUtils.equals(dataUtils2)));
+        // 这里TextView中显示的就是 {thisiskey=11}
+        textView.setText(map.toString());
+        textView.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, SecondActivity.class));
+            }
+        });
+    }
+}
+```
+
+`@Lazy`，这个并不是作为注解使用的，而是作为wrapper类型使用，比如下面这样
+
+```java
+    @Inject
+    Lazy<DataUtils> dataUtils;
+```
+
+使用Lazy修饰的类型不会在注入的时候初始化，只能通过get方法获取实例，下面的Log日志显示了未初始化的dataUtils是什么类型
+
+```java
+public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = MainActivity.class.getSimpleName();
+
+    @Inject
+    Lazy<DataUtils> dataUtils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        DaggerMainActivityComponent
+                .builder()
+                .dataUtilsComponent(((MyApp) getApplication()).getDataUtilsComponent())
+                .build()
+                .inject(this);
+        // dataUtils是dagger.internal.DoubleCheck@3050053
+        Log.i(TAG, dataUtils.toString());
+
+        DataUtils utils = dataUtils.get();
+        // utils是com.example.daggerdemo.di.model.DataUtils@26c9d90
+        Log.i(TAG, utils.toString());
+    }
+}
+```
 
 
 
+### 1.7 
 
-### 1.6
+
 
 
 ## dagger.android
