@@ -1741,7 +1741,7 @@ public class UtilsMapModule {
 
 ```java
 @Module
-public abstract class UtilsMapModule {
+public abstract class UtilsBindModule {
 
     @Multibinds
     abstract Set<String> utilsSet();
@@ -1753,12 +1753,9 @@ public abstract class UtilsMapModule {
 
 MultiBinds只能用于标注抽象方法，它仅仅是告诉Component我有这么一种提供类型，让我们Component可以在Component中暴露Set或者Map类型的接口，但是不能包含具体的元素。Multibinds注解是可以和第一种集合定义混用的。
 
+如果将UtilsBindModule单独加在某个Component的modules参数时，它并不能提供实例，而是提供一个空的实例，如果将它和另一个可以提供具体实例的Module一起加在某个Component的modules参数时，会自动获取非空实例，此时UtilsBindModule没有作用。
 
-
-
-
-
-## dagger.android
+## 2. dagger.android进阶
 
 dagger框架可以用于Java Web项目同时也可以用于Android项目，但是在Android项目中，最重要最常用的几个组件比如Activity，如果需要进行依赖注入，那会是一个什么样的情形呢。
 
