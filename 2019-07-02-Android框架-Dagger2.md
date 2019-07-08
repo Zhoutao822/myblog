@@ -43,7 +43,7 @@ public class Dependent {
 }
 ```
 
-看名字知含义，在上面的代码中Dependent类的构造始终需要Dependency类，那么我们就称Dependency为依赖，将其引入Dependent中的过程称为注入，上述代码在构造函数中引入，当然也可以通过set方法引入，无论是哪种方式都会面临一个问题就是当我们后续如果需要修改Dependency的构造函数时，需要在所有包含`new Dependency()`的代码中进行修改，显然这是非常痛苦的事情，而且不符合依赖倒置原则，本文所涉及到的是通过注解的方式进行依赖注入可以解决这种问题。
+看名字知含义，在上面的代码中Dependent类的构造始终需要Dependency类，那么我们就称Dependency为依赖，将其引入Dependent中的过程称为注入，上述代码在构造函数中引入，当然也可以通过set方法注入，无论是哪种方式都会面临一个问题就是当我们后续如果需要修改Dependency的构造函数时，需要在所有包含`new Dependency()`的代码中进行修改，显然这是非常痛苦的事情，而且不符合依赖倒置原则，本文所涉及到的是通过注解的方式进行依赖注入可以解决这种问题。
 
 <!-- more -->
 
@@ -677,7 +677,6 @@ public interface MainActivityComponent {
 4. 此时系统发现DataUtilsModule的provide方法是带参数AbstractUtils的，而且还有限定符，那么同样需要能够提供AbstractUtils的Module，这不是恰好与第3步的AbstractUtilsModule相同吗，那么就按照参数限定符找到AbstractUtilsModule的对应provide方法，结果发现它可以直接返回new ApiUtils()对象，正合我心，且不需要继续走下去，那么实例化完成。
 
 在寻找实例的路线中需要用到的Module都必须加在Component中的modules参数中，否则这条路线走不通（DataUtilsModule -> AbstractUtilsModule），存在的问题是你需要知道所有路线上的Module并且将其加入到Component中，显然对于多级依赖产生的多个Module这是不合适的。
-
 
 
 ### 1.4 @Component的dependence和@SubComponent
@@ -1446,9 +1445,315 @@ public class MainActivity extends AppCompatActivity {
 }
 ```
 
+### 1.7 @Binds和@Multibinds
+
+`@Binds`注解与`@Provides`有异曲同工之妙，其修饰的方法都是为了提供实例，但是具体使用起来又有区别，`@Binds`只能在抽象类Module中使用，并且修饰抽象方法，为了使用`@Binds`注解，我们首先构造一个抽象类DBUtilsModule用于提供DBUtils，LocalDBUtils继承自DBUtils，我们希望不直接用到LocalDBUtils的构造方法而去生成它。
+
+```java
+// 首先这是一个Module，而且是抽象的，其次provideLocalDBUtils方法也是抽象的，用@Binds修饰，方法的参数即返回的实例
+// 为了对比，加上了一个普通的Provides修饰的方法
+@Module
+public abstract class DBUtilsModule {
+  // provideLocalDBUtils看似返回的是DBUtils，但实际返回的是LocalDBUtils的实例
+    @Binds
+    @LocalDBDataUtils
+    abstract DBUtils provideLocalDBUtils(LocalDBUtils localDBUtils);
+
+    @Provides
+    static DBUtils provideDBUtils() {
+        return new DBUtils();
+    }
+}
+```
+
+```java
+// 因为使用provideLocalDBUtils方法，所以需要通过inject的方法提供LocalDBUtils实例，这里使用最简单的构造函数注入，
+// 当然也可以使用Module提供LocalDBUtils实例，这里仅作演示
+public class LocalDBUtils extends DBUtils {
+
+    @Inject
+    public LocalDBUtils() {
+    }
+
+    @Override
+    public String showMessage() {
+        return "This is LocalDBDataUtils";
+    }
+}
+```
+
+```java
+// 增加一个限定符注解，为了区分provideDBUtils和provideLocalDBUtils
+@Qualifier
+@Retention(RetentionPolicy.RUNTIME)
+public @interface LocalDBDataUtils {
+}
+```
+
+```java
+// 同理需要定义一个Component来提供实例方法，也可以不用这个Component，具体区别稍后再点明
+@Component(modules = DBUtilsModule.class)
+public interface DBUtilsComponent {
+
+    @LocalDBDataUtils
+    DBUtils getLocalDBUtils();
+
+    DBUtils getDBUtils();
+}
+```
+
+```java
+// 如果加了上面的DBUtilsComponent，则ActivityComponent需要用dependencies
+@Component(dependencies = DBUtilsComponent.class)
+public interface SecondActivityComponent {
+    void inject(SecondActivity secondActivity);
+}
+
+// 如果不加上面的DBUtilsComponent，则ActivityComponent需要modules
+@Component(modules = DBUtilsModule.class)
+public interface SecondActivityComponent {
+    void inject(SecondActivity secondActivity);
+}
+```
+
+最后再SecondActivity中使用
+
+```java
+public class SecondActivity extends AppCompatActivity {
+    // 获取实例可以通过限定符注解的方法获取指定的实例
+    // 比如这里@LocalDBDataUtils表明需要provideLocalDBUtils方法返回的实例
+    // 如果这里不加@LocalDBDataUtils，则代表provideDBUtils返回的实例
+    @LocalDBDataUtils
+    @Inject
+    DBUtils dbUtils;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_second);
+        // 如果加了上面的DBUtilsComponent
+        DaggerSecondActivityComponent
+                .builder()
+                .dBUtilsComponent(DaggerDBUtilsComponent.create())
+                .build()
+                .inject(this);        
+
+        // 如果不加上面的DBUtilsComponent
+        DaggerSecondActivityComponent
+                .builder()
+                .build()
+                .inject(this);
+        Log.i("MainActivity2", dbUtils.showMessage());
+    }
+}
+```
+
+通过`@Binds`修饰抽象方法会有什么区别呢，我们在加了上面的DBUtilsComponent的情况下看一下源码DaggerDBUtilsComponent
+
+```java
+public final class DaggerDBUtilsComponent implements DBUtilsComponent {
+  private DaggerDBUtilsComponent() {}
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static DBUtilsComponent create() {
+    return new Builder().build();
+  }
+// Binds修饰抽象方法会导致实例在DaggerDBUtilsComponent直接构造生成
+  @Override
+  public DBUtils getLocalDBUtils() {
+    return new LocalDBUtils();
+  }
+// 普通的Provides修饰是通过DBUtilsModule_ProvideDBUtilsFactory工厂类生成
+  @Override
+  public DBUtils getDBUtils() {
+    return DBUtilsModule_ProvideDBUtilsFactory.provideDBUtils();
+  }
+
+  public static final class Builder {
+    private Builder() {}
+
+    public DBUtilsComponent build() {
+      return new DaggerDBUtilsComponent();
+    }
+  }
+}
+```
+
+简而言之，`@Binds`注解的作用还是修饰提供实例的方法，但是其修饰的方法的参数即返回的实例，我们不需要显示地调用需要地实例地构造函数，因为在生成地代码中为我们完成了这些工作，与此同时，它地效率可能会高一些，因为是直接在Component中生成的。
+
+`@BindsInstance`比较适合与`@Component.Builder`方法一起说明，直接看代码，我们这里需要注入Application的Context，虽然显得很奇怪
+
+首先是AppComponent，最后需要用这个调用inject方法注入到Application中
+
+```java
+// 单例模式，以及modules参数不解释
+@Singleton
+@Component(modules = AppModule.class)
+public interface AppComponent {
+// 这里出现了@Component.Builder注解，它的作用是提供自定义的方式构造此Component，根据注释要求
+// 1. 必须有一个返回此Component的build方法 AppComponent build();
+// 2. 可以有抽象方法作为setter方法
+// 3. setter方法必须有一个参数，并且返回void、builder、builder的父类
+// 4. 必须有一个setter方法用于设置dependencies（如果有的话）
+// 5. 必须有setter方法用于设置modules里面有非抽象方法的非抽象module
+// 6. 可以有setter方法初始化modules
+// 7. 可以有@BindsInstance修饰的方法将绑定的实例传递给此Component
+// 8. 可以有非抽象方法，但是如果与builder生成相关则会被忽略
+// 注释说的并不是很清楚，需要自行测试其功能，此处仅演示
+    @Component.Builder
+    interface Builder {
+        // 这里两个方法setApplication和setDBName暴露出去，在调用inject方法时初始化
+        // 且这两个方法的参数application和name会被传入到AppModule的provide方法的参数中
+        // 即我们实现了在外部对Component进行初始化参数设置的功能
+        @BindsInstance
+        Builder setApplication(Application application);
+
+        @BindsInstance
+        Builder setDBName(String name);
+
+        AppComponent build();
+
+    }
+
+    void inject(MyApp app);
+}
+```
+
+接下来是AppModule，提供两个方法用于提供实例，注入的对象分别是Context和Integer（Context是上下文，后续会介绍；Integer是演示，没有意义）
+
+```java
+@Module
+public class AppModule {
+    // 这里传入的两个参数application和name来自于AppComponent的Builder方法中的setApplication和setDBName
+    @Provides
+    @Singleton
+    Context provideContext(Application application) {
+        return application;
+    }
+
+    @Provides
+    @Singleton
+    Integer provideDBName(String name) {
+        return name.hashCode();
+    }
+
+}
+```
+
+最后在自定义的Application中注入
+
+```java
+public class MyApp extends Application {
+
+    @Inject
+    Context context;
+
+    @Inject
+    Integer dbName;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // 传入的参数包括this和hello.db
+        // 这样就把传入的参数通过Component转换并注入到MyApp中了
+        // 虽然这种方式没有意义，但是后续有用，这里仅演示BindsInstance的功能
+        DaggerAppComponent
+                .builder()
+                .setApplication(this)
+                .setDBName("hello.db")
+                .build()
+                .inject(this);
+        Log.i("MyApp", context.toString());
+        Log.i("MyApp", dbName.toString());
+    }
+}
+```
+
+`@MultiBinds`顾名思义，肯定与注入多个对象相关，假如我们需要在Module里提供了很多相同类型的 对象，如果我们不使用`@Qualifer`，就会导致同一类型重复绑定的错误。但是如果我们确实需要在一个Module里包含这些对象的创建，又不想创建N多的`@Qualifer`，我们就可以使用`@MultiBind`机制来达到我们的目的。
+
+MultiBind机制允许我们为这些对象创建一个集合，这个集合必须是Set或者Map，这样在Component中，我们就可以暴露这个集合，通过集合来获取不同的对象。这个集合的创建有三种方法
+
+1. 使用`@IntoSet`或者`@IntoMap`
+
+```java
+// 还记得上面提到的@MapKey注解吗
+@Module
+public class UtilsMapModule {
+  // 这里首先是Provides注解，然后是IntoMap注解，最后是前面定义的MapKey注解，同时传入了Map的key值为thisiskey
+    @Provides
+    @IntoMap
+    @UtilsMapKey("thisiskey1")
+    Integer provideUtilsMapValue1(){
+      // 返回值即为value，虽然返回值为value，但实际上注入时传入的是整个Map
+        return 11;
+    }
+    // 下面加的代码没有测试过，仅演示
+    @Provides
+    @IntoMap
+    @UtilsMapKey("thisiskey2")
+    Integer provideUtilsMapValue2(){
+        return 12;
+    }
+
+    @Provides
+    @IntoSet
+    Integer provideUtilsSetValue1(){
+        return 111;
+    }
+
+    @Provides
+    @IntoSet
+    Integer provideUtilsSetValue2(){
+        return 222;
+    }    
+}
+```
+
+2. 直接提供Set或者Map类型
+
+```java
+@Module
+public class UtilsMapModule {
+  
+    @Provides
+    Set<String> provideUtilsSet(){
+      Set<String> utils = new HashSet<>();
+      utils.add("utils1");
+      utils.add("utils2");
+      return utils;
+    }
+
+    @Provides
+    Map<String, Integer> provideUtilsMap(){
+      Map<String, Integer> utils = new HashMap<>();
+      utils.put("utils-key1", 111);
+      utils.put("utils-key2", 222);
+      return utils;
+    }
+
+}
+```
+
+3. 使用`@MultiBinds`注解
+
+```java
+@Module
+public abstract class UtilsMapModule {
+
+    @Multibinds
+    abstract Set<String> utilsSet();
+
+    @Multibinds
+    abstract Map<String, Integer> utilsMap();
+}
+```
+
+MultiBinds只能用于标注抽象方法，它仅仅是告诉Component我有这么一种提供类型，让我们Component可以在Component中暴露Set或者Map类型的接口，但是不能包含具体的元素。Multibinds注解是可以和第一种集合定义混用的。
 
 
-### 1.7 
 
 
 

@@ -191,7 +191,7 @@ sudo tlmgr install latexmk
 
 ### 3. 编译论文模板
 
-在Mac上使用`latexmk -xelatex main.tex`会失败，而且系统不会像Windows那样提示你需要下载哪些package，每次失败都会告诉你缺少哪个文件，这个在log中是可以看到的，一般来说在[CTAN官网](https://www.ctan.org/)搜索缺少的文件就可以知道需要下载哪个package。
+在Mac上使用`latexmk -xelatex main.tex`会失败，而且**系统不会像Windows那样提示你需要下载哪些package，每次失败都会告诉你缺少哪个文件，这个在log中是可以看到的，一般来说在[CTAN官网](https://www.ctan.org/)*搜索缺少的文件*就可以知道需要下载哪个package**。
 
 下载package的代码为
 
