@@ -16,6 +16,8 @@ tags:
 > [Dagger](https://dagger.dev/)
 > [Dagger2 最清晰的使用教程](https://www.jianshu.com/p/24af4c102f62?utm_campaign=maleskine&utm_content=note&utm_medium=seo_notes&utm_source=recommendation)
 > [The New Dagger2](https://blog.mindorks.com/the-new-dagger-2-android-injector-cbe7d55afa6a)
+> [Dagger 2 完全解析](https://www.jianshu.com/p/2ac2f39cb25f)
+
 
 Dagger2框架是一个依赖注入框架，它既可以用于Java Web项目也可以用于Android项目，依赖注入是什么意思呢
 
@@ -323,6 +325,8 @@ public final class DaggerMainActivityComponent implements MainActivityComponent 
 * void inject(目标类 obj);Dagger2会从目标类开始查找@Inject注解，自动生成依赖注入的代码，调用inject可完成依赖的注入。
 * Object getObj(); 如：Utils getUtils();
 Dagger2会到Utils类中找被@Inject注解标注的构造器，自动生成提供Utils依赖的代码，这种方式一般为其他Component提供依赖。（一个Component可以依赖另一个Component，后面会说）
+
+Components所依赖的所有module里不能有重复的@Provides方法（重载，或者同返回类型的），这里还包括后面讲到的依赖的其他的Component也不能有重复的，因为Dagger无法判断你究竟想要那个作为依赖（也就是依赖迷失）
 
 使用接口定义，并且`@Component`注解。命名方式推荐为：目标类名+Component，在编译后Dagger2就会为我们生成DaggerXXXComponent这个类，它是我们定义的xxxComponent的实现，在目标类中使用它就可以实现依赖注入了。
 
@@ -1803,7 +1807,7 @@ public class XXXEntityModule {
 
 那么首先需要回顾一下`DaggerXXXActivityComponent.create().inject(this)`，详情请往上翻，本质上相当于调用`this.XXXEntity = new XXXEntity()`，但是初始化过程Avtivity并不需要知道，都是通过dagger生成的代码执行的结果。
 
-### Injecting Activity objects
+### 2.1 Injecting Activity objects
 
 官网给出了在Activity中进行依赖注入的步骤，首先过一遍流程，然后再根据代码分析原理：
 
@@ -1824,10 +1828,10 @@ public interface AppComponent {
 
 ```java
 // MainActivitySubComponent.java
-// 这里的module也必须是AndroidInjectionModule.class，且接口继承自AndroidInjector<YourActivity>，
+// 这里接口继承自AndroidInjector<YourActivity>，
 // 同时需要一个Subcomponent.Factory工厂类继承自AndroidInjector.Factory<YourActivity>
 // 现在你可能一脸懵逼，这是啥，为什么要这么写，但是没关系，后面肯定会用到
-@Subcomponent(modules = AndroidInjectionModule.class)
+@Subcomponent
 public interface MainActivitySubComponent extends AndroidInjector<MainActivity> {
 
     @Subcomponent.Factory
@@ -1842,7 +1846,8 @@ public interface MainActivitySubComponent extends AndroidInjector<MainActivity> 
 // 这里的subcomponents需要上一步定义的MainActivitySubComponent.class，而且这是一个抽象类
 @Module(subcomponents = MainActivitySubComponent.class)
 public abstract class MainActivityModule {
-    // 需要一个这样的抽象工程方法，这个方法还加了很多的注解，暂时不管这些有什么用，但是没有这个方法肯定会报错
+    // 还记得上面提到的@Binds注解吗，这里表示MainActivityModule可以提供MainActivitySubComponent.Factory对象
+    // 前提是key为MainActivity.class
     @Binds
     @IntoMap
     @ClassKey(MainActivity.class)
@@ -1945,7 +1950,7 @@ public class AppModule {
 }
 ```
 
-### Injecting Activity objects源码分析
+### 2.2 Injecting Activity objects源码分析
 
 需要分析源码才能知道问什么上面我们需要定义各种Factory接口以及为什么要在Application中进行注入
 
@@ -2457,6 +2462,12 @@ public final class MyApplication_MembersInjector implements MembersInjector<MyAp
   }
 ```
 
+上述代码过程比较长，下面重新整理一下inject的流程：
+
+1. 将`DispatchingAndroidInjector<Activity>`注入到Application中，注入的时候会将AppComponent中的各个module所能提供的实例用Provider初始化，与此同时也会根据带有subcomponent和抽象方法的module生成MainActivitySubComponent.Factory的Provider，为注入到指定Activity提供接口；
+2. 在MainActivity中执行`AndroidInjection.inject(this);`即可获取`@Inject`修饰的实例，这是由于`AndroidInjection.inject(this);`实际上调用的是Application中的`DispatchingAndroidInjector<Activity>.inject`方法，`DispatchingAndroidInjector<Activity>`可以获取到在DaggerAppComponent初始化的实例的Provider以及对应MainActivity的MainActivitySubComponent.Factory的Provider，这个MainActivitySubComponent.Factory可以提供将实例注入到MainActivity中的inject方法，所以`DispatchingAndroidInjector<Activity>.inject`方法实际上是执行MainActivitySubComponent.Factory提供的inject方法，也就完成了注入。
+
+
 至此，与依赖注入相关的自动生成的代码已经分析完毕了，整个注入的流程也明白了，但是还遗留了几个问题：
 
 1. 为什么要在自定义Application进行注入，以及为什么要实现接口HasActivityInjector？
@@ -2464,7 +2475,7 @@ public final class MyApplication_MembersInjector implements MembersInjector<MyAp
 3. MainActivitySubComponent为什么要继承AndroidInjector<MainActivity>，为什么要定义Factory继承AndroidInjector.Factory<MainActivity>？
 4. MainActivityModule的subcomponents为什么是MainActivitySubComponent.class，以及为什么要定义抽象方法bindMainActivityAndroidInjectorFactory？
 
->  1. 为什么要在自定义Application进行注入，以及为什么要实现接口HasActivityInjector？
+> 1. 为什么要在自定义Application进行注入，以及为什么要实现接口HasActivityInjector？
 
 仔细看AndroidInjection.inject(this)的源码不难知道，activityInjector是来自于application的，为什么要依靠application，
 因为当我们获取activityInjector时需要一个全局的类，其他Activity或者Fragment也能访问到，而且必须先于Activity或者Fragment被实例化，
@@ -2498,9 +2509,342 @@ public abstract class AndroidInjectionModule {
 
 MultiBinds只能用于标注抽象方法，它仅仅是告诉Component我有这么一种提供类型，让我们Component可以在Component中暴露Set或者Map类型的接口，但是不能包含具体的元素。
 
+再看DispatchingAndroidInjector的构造方法
+
+```java
+  @Inject
+  DispatchingAndroidInjector(
+      Map<Class<?>, Provider<AndroidInjector.Factory<?>>> injectorFactoriesWithClassKeys,
+      Map<String, Provider<AndroidInjector.Factory<?>>> injectorFactoriesWithStringKeys) {
+    this.injectorFactories = merge(injectorFactoriesWithClassKeys, injectorFactoriesWithStringKeys);
+  }
+```
+
+DispatchingAndroidInjector的构造方法也是通过Inject方式，所以它的参数也必须由Component中的Module来提供，而且其参数是后续初始化过程确定的，所以需要用抽象类来实现，通过抽象类占位保证编译成功。
+
+> 3. MainActivitySubComponent为什么要继承AndroidInjector<MainActivity>，为什么要定义Factory继承AndroidInjector.Factory<MainActivity>？
+
+我们需要在DaggerAppComponent提供能将实例注入到指定Activity的Provider---比如mainActivitySubComponentFactoryProvider，这个Provider需要能够提供Factory实现create方法，create方法能够返回MainActivitySubComponentImpl实现inject方法，这两个方法都是与MainActivity关联的，所以需要自定义MainActivitySubComponent，其继承的接口AndroidInjector<MainActivity>包括create方法，而且子接口AndroidInjector.Factory<MainActivity>包括inject方法。
+
+> 4. MainActivityModule的subcomponents为什么是MainActivitySubComponent.class，以及为什么要定义抽象方法bindMainActivityAndroidInjectorFactory？
+
+抽象方法bindMainActivityAndroidInjectorFactory被`@Binds`修饰，提供的是这个方法的参数实例；
+AppComponent依赖MainActivityModule，作为父Component；MainActivitySubComponent作为子Component，用`@Subcomponent`标注；在父Component依赖的MainActivityModule的subcomponents参数加上MainActivitySubComponent，然后就可以在父ComponentAppComponent中请求SubComponent.Factory。此时SubComponent编译时不会生成 DaggerXXComponent，需要通过 父Component 的获取 SubComponent.Factory 方法获取 SubComponent 实例。
+
+以上过程中，如果要增加SecondActivity，那么同样需要增加SecondActivityModule和SecondActivitySubComponent，并且加在AppComponent的modules参数中，显然AppComponent的参数会很多，解决方法是
+
+**如果您的subcomponent 及其构建器没有第2步中提到的其他方法或超类型，您可以使用@ContributesAndroidInjector为您生成它们。我们就不需要步骤2和3，取而代之的是添加一个抽象模块方法，该方法返回您的activity，使用@ContributesAndroidInjector对其进行注解，并指定要安装到子组件中的模块。 如果子组件需要scopes，则也可以用@scopes注解到该方法。**
+
+代码如下
+
+```java
+@ActivityScope
+@ContributesAndroidInjector(modules = { /* modules to install into the subcomponent */ })
+abstract YourActivity contributeYourActivityInjector();
+```
+
+1. 首先将Activity依赖的module都集中在一个module中ActivityBuilder
+
+```java
+@Module
+public abstract class ActivityBuilder {
+
+    @ContributesAndroidInjector(modules = {
+            MainActivityModule.class})
+    abstract MainActivity bindMainActivity();
+
+    @ContributesAndroidInjector(modules = {
+            SecondActivityModule.class})
+    abstract SecondActivity bindSecondActivity();
+}
+```
+
+2. 修改AppComponent的modules参数，删掉之前对应Activity的module，增加ActivityBuilder
+
+```java
+@Singleton
+@Component(modules = {AndroidInjectionModule.class, ActivityBuilder.class, AppModule.class})
+public interface AppComponent {
+
+    void inject(MyApplication application);
+}
+```
+
+3. 修改MainActivityModule，非抽象类，删掉抽象方法，删掉subcomponents参数，同理对SecondActivityModule
+
+```java
+@Module
+public class MainActivityModule {
+
+    @Provides
+    Entity provideEntity() {
+        return new Entity();
+    }
+}
+
+@Module
+public class SecondActivityModule {
+    @Provides
+    Integer provideInteger() {
+        return 123;
+    }
+}
+```
+
+4. 在Activity中注入，Application不变
+
+```java
+public class MainActivity extends AppCompatActivity {
+
+    @Inject
+    Entity entity;
+
+    @Inject
+    String info;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        AndroidInjection.inject(this);
+
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        String text = entity.showMessage() + " - " + info;
+        Log.i("aaaa", text);
+        startActivity(new Intent(MainActivity.this, SecondActivity.class));
+    }
+}
+
+public class SecondActivity extends AppCompatActivity {
+
+    @Inject
+    String info;
+
+    @Inject
+    Integer num;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        AndroidInjection.inject(this);
+
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_second);
+        Log.i("aaaa", info + num);
+    }
+}
+
+public class MyApplication extends Application implements HasActivityInjector {
+
+    @Inject
+    DispatchingAndroidInjector<Activity> dispatchingActivityInjector;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        DaggerAppComponent.create()
+                .inject(this);
+    }
+
+    @Override
+    public AndroidInjector<Activity> activityInjector() {
+        return dispatchingActivityInjector;
+    }
+}
+```
+
+### 2.3 Injecting Fragment objects
+
+为Fragment注入对象，需要在Fragment的onAttach()方法中执行`AndroidSupportInjection.inject(this);`
+
+提供Fragment实例的Component可以是其他Fragment的Component的Subcomponent，也可以是Activity的Component的Subcomponent，同样也可以是Application的Component的Subcomponent，具体情况具体分析，看你的Fragment生命周期要求。比如这里我们在SecondActivity中增加一个Fragment，Fragment显示的内容是Entity的列表
+
+以基于Activity为例，首先需要对宿主Activity进行处理
+
+```java
+public class SecondActivity extends AppCompatActivity implements HasSupportFragmentInjector {
+// 以基于SecondActivity的方式对从SecondActivity启动的Fragment进行注入，则需要实现HasSupportFragmentInjector接口
+// 这个接口的方法非常类似Application中的，功能基本相同，不过此处说明生命周期与SecondActivity相同，如果SecondActivity不存在
+// 那么EntityFragment也无法注入
+    @Inject
+    DispatchingAndroidInjector<Fragment> fragmentDispatchingAndroidInjector;
+
+    @Inject
+    String info;
+
+    @Inject
+    Integer num;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        AndroidInjection.inject(this);
+
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_second);
+        Log.i("aaaa", info + num);
+        // 加载EntityFragment
+        getSupportFragmentManager()
+                .beginTransaction()
+                .disallowAddToBackStack()
+                .add(R.id.container, EntityFragment.newInstance(), EntityFragment.TAG)
+                .commit();
+    }
+
+    @Override
+    public AndroidInjector<Fragment> supportFragmentInjector() {
+        return fragmentDispatchingAndroidInjector;
+    }
+}
+```
+
+然后是定义的EntityFragment
+
+```java
+public class EntityFragment extends Fragment {
+
+    public static final String TAG = EntityFragment.class.getSimpleName();
+// 仔细思考Fragment+RecyclerView需要注入哪些对象，很显然常见的是LinearLayoutManager和RecyclerView.Adapter
+    @Inject
+    LinearLayoutManager mLayoutManager;
+    @Inject
+    EntityListAdapter mEntityListAdapter;
+
+    private RecyclerView recyclerView;
+
+    public static EntityFragment newInstance() {
+        Bundle args = new Bundle();
+        EntityFragment fragment = new EntityFragment();
+        fragment.setArguments(args);
+        return fragment;
+    }
+// 在onAttach中注入
+    @Override
+    public void onAttach(Context context) {
+        AndroidSupportInjection.inject(this);
+        super.onAttach(context);
+    }
+
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_item_list, container, false);
+
+        List<Entity> data = new ArrayList<>();
+
+        for (int i = 0; i < 10; i++) {
+            data.add(new Entity());
+        }
+        // 这里就可以直接用
+        mEntityListAdapter.addItems(data);
+        recyclerView = view.findViewById(R.id.list);
+        recyclerView.setLayoutManager(mLayoutManager);
+        recyclerView.setAdapter(mEntityListAdapter);
+        return view;
+    }
+}
+```
+
+与EntityFragment相关的注入的对象有LinearLayoutManager和EntityListAdapter，因此需要module提供这两者的实例
+
+```java
+// EntityFragment依赖EntityFragmentModule提供的实例
+@Module
+public class EntityFragmentModule {
+    @Provides
+    LinearLayoutManager provideLinearLayoutManager(EntityFragment fragment) {
+        return new LinearLayoutManager(fragment.getActivity());
+    }
+
+    @Provides
+    EntityListAdapter provideEntityListAdapter() {
+        return new EntityListAdapter();
+    }
+}
+```
+
+根据2.2最后一部分的内容做一个优化，将module绑定到另一个集成module中
+
+```java
+@Module
+public abstract class EntityFragmentProvider {
+
+    @ContributesAndroidInjector(modules = EntityFragmentModule.class)
+    abstract EntityFragment provideEntityFragmentFactory();
+}
+```
+
+修改ActivityBuilder，将EntityFragmentProvider加入
+
+```java
+@Module
+public abstract class ActivityBuilder {
+
+    @ContributesAndroidInjector(modules = {
+            MainActivityModule.class})
+    abstract MainActivity bindMainActivity();
+
+    @ContributesAndroidInjector(modules = {
+            SecondActivityModule.class,
+            EntityFragmentProvider.class})
+    abstract SecondActivity bindSecondActivity();
+}
+```
+
+最后看一下EntityListAdapter的实现
+
+```java
+public class EntityListAdapter extends RecyclerView.Adapter<EntityListAdapter.MyViewHolder> {
+
+    private List<Entity> data;
+
+    public EntityListAdapter() {
+        this.data = new ArrayList<>();
+    }
+
+    public void addItems(List<Entity> list) {
+        data.addAll(list);
+        notifyDataSetChanged();
+    }
+
+    @NonNull
+    @Override
+    public MyViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.fragment_item, parent, false);
+        MyViewHolder viewHolder = new MyViewHolder(view);
+        return viewHolder;
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull MyViewHolder holder, int position) {
+        Entity entity = data.get(position);
+        holder.number.setText(String.valueOf(position));
+        holder.content.setText(entity.showMessage());
+    }
+
+    @Override
+    public int getItemCount() {
+        return data.size();
+    }
+
+    class MyViewHolder extends RecyclerView.ViewHolder {
+        TextView number;
+        TextView content;
+
+        MyViewHolder(@NonNull View itemView) {
+            super(itemView);
+            number = itemView.findViewById(R.id.item_number);
+            content = itemView.findViewById(R.id.content);
+        }
+    }
+}
+```
 
 
-components所依赖的所有module里不能有重复的@Provides方法（重载，或者同返回类型的），这里还包括后面讲到的依赖的其他的Component也不能有重复的，因为Dagger无法判断你究竟想要那个作为依赖（也就是依赖迷失）
+
+
+
+
+
+
 
 
 
