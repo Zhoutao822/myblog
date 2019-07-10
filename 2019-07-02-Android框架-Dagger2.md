@@ -322,9 +322,9 @@ public final class DaggerMainActivityComponent implements MainActivityComponent 
 
 2. `@Component`一般有两种方式定义方法
 
-* void inject(目标类 obj);Dagger2会从目标类开始查找@Inject注解，自动生成依赖注入的代码，调用inject可完成依赖的注入。
-* Object getObj(); 如：Utils getUtils();
-Dagger2会到Utils类中找被@Inject注解标注的构造器，自动生成提供Utils依赖的代码，这种方式一般为其他Component提供依赖。（一个Component可以依赖另一个Component，后面会说）
+* `void inject(目标类 obj);`Dagger2会从目标类开始查找`@Inject`注解，自动生成依赖注入的代码，调用inject可完成依赖的注入。
+* `Object getObj();` 如：`Utils getUtils();`
+Dagger2会到Utils类中找被`@Inject`注解标注的构造器，自动生成提供Utils依赖的代码，这种方式一般为其他Component提供依赖。（一个Component可以依赖另一个Component，后面会说）
 
 Components所依赖的所有module里不能有重复的@Provides方法（重载，或者同返回类型的），这里还包括后面讲到的依赖的其他的Component也不能有重复的，因为Dagger无法判断你究竟想要那个作为依赖（也就是依赖迷失）
 
@@ -332,9 +332,8 @@ Components所依赖的所有module里不能有重复的@Provides方法（重载�
 
 ### 1.2 @Module和@Provides
 
-使用@Inject标记构造器提供依赖是有局限性的，比如说我们需要注入的对象是第三方库提供的，我们无法在第三方库的构造器上加上@Inject注解。
-
-或者，我们使用依赖倒置的时候，因为需要注入的对象是抽象的，@Inject也无法使用，因为抽象的类并不能实例化，比如：
+使用`@Inject`标记构造器提供依赖是有局限性的，比如说我们需要注入的对象是第三方库提供的，我们无法在第三方库的构造器上加上`@Inject`注解。
+或者，我们使用依赖倒置的时候，因为需要注入的对象是抽象的，`@Inject`也无法使用，因为抽象的类并不能实例化，比如：
 
 ```java
 public abstract class AbstractUtils {
@@ -537,7 +536,7 @@ public final class AbstractUtilsModule_ProvideDataUtilsFactory implements Factor
 
 ### 1.3 @Qualifier和@Named
 
-直接上代码，首先是AbstractUtilsModule，通过添加`@Named`并指定一个字符来区别不同的实例，注意这里的方法名其实作用不大，完全依靠限定符区分，这里两个provide方法分别返回之前的两个AbstractUtils的子类DBUtils和ApiUtils。
+直接上代码，首先是AbstractUtilsModule，通过添加`@Named`并指定一个字符来区别不同的实例，这里两个provide方法分别返回之前的两个AbstractUtils的子类DBUtils和ApiUtils。
 
 ```java
 @Module
@@ -717,7 +716,7 @@ public interface DataUtilsComponent {
 }
 ```
 
-其次需要修改MainActivityComponent的参数，这里可以发现不再使用modules参数二是dependencies
+其次需要修改MainActivityComponent的参数，这里可以发现不再使用modules参数而是dependencies
 
 ```java
 // dependencies = DataUtilsComponent.class表明可能需要DataUtilsComponent提供的实例，
@@ -890,7 +889,6 @@ public interface AbstractUtilsComponent {
 //    AbstractUtils getApiUtils();
 
     DataUtilsComponent plus(DataUtilsModule dataUtilsModule);
-
 }
 ```
 
@@ -907,7 +905,7 @@ public interface DataUtilsComponent {
 其次是MainActivityComponent，同理，修改注解为`@Subcomponent`，且删除了dependencies参数
 
 ```java
-@Subcomponent()
+@Subcomponent
 public interface MainActivityComponent {
     void inject(MainActivity activity);
 }
@@ -1091,7 +1089,7 @@ public final class AbstractUtilsModule_ProvideApiUtilsFactory implements Factory
 
 Component Dependencies：
 
-1. 你想保留独立的想个组件（Flower可以单独使用注入，Pot也可以）
+1. 你想保留独立的想个组件（DataUtils可以单独使用注入，DBUtils也可以）
 2. 要明确的显示该组件所使用的其他依赖
 
 Subcomponent：
@@ -1213,7 +1211,6 @@ public class SecondActivity extends AppCompatActivity {
         // 此时dataUtils3与dataUtils并不相同，也就说dataUtils仅在MainActivity中是单例
         Log.i(TAG, dataUtils3.toString());
 
-
         textView.setText(dataUtils3.show());
     }
 }
@@ -1316,8 +1313,7 @@ public class MyApp extends Application {
     public void onCreate() {
         super.onCreate();
         DaggerApplicationComponent
-                .builder()
-                .build()
+                .create()
                 .inject(this);
     }
 
@@ -1353,7 +1349,7 @@ public class UtilsMapModule {
     @IntoMap
     @UtilsMapKey("thisiskey")
     Integer provideUtilsMapValue(){
-      // 返回值即为value，虽然返回值为value，但实际上注入时传入的是整个Map
+      // 返回值即为value，虽然返回值为value，但实际上注入时传入的是整个Map<String, Integer>
         return 11;
     }
 }
@@ -1513,7 +1509,7 @@ public interface SecondActivityComponent {
     void inject(SecondActivity secondActivity);
 }
 
-// 如果不加上面的DBUtilsComponent，则ActivityComponent需要modules
+// 如果不加上面的DBUtilsComponent，则ActivityComponent需要用modules
 @Component(modules = DBUtilsModule.class)
 public interface SecondActivityComponent {
     void inject(SecondActivity secondActivity);
@@ -1544,8 +1540,7 @@ public class SecondActivity extends AppCompatActivity {
 
         // 如果不加上面的DBUtilsComponent
         DaggerSecondActivityComponent
-                .builder()
-                .build()
+                .create()
                 .inject(this);
         Log.i("MainActivity2", dbUtils.showMessage());
     }
@@ -1619,7 +1614,6 @@ public interface AppComponent {
         Builder setDBName(String name);
 
         AppComponent build();
-
     }
 
     void inject(MyApp app);
@@ -1680,7 +1674,7 @@ public class MyApp extends Application {
 
 MultiBind机制允许我们为这些对象创建一个集合，这个集合必须是Set或者Map，这样在Component中，我们就可以暴露这个集合，通过集合来获取不同的对象。这个集合的创建有三种方法
 
-1. 使用`@IntoSet`或者`@IntoMap`
+1.使用`@IntoSet`或者`@IntoMap`
 
 ```java
 // 还记得上面提到的@MapKey注解吗
@@ -1716,7 +1710,7 @@ public class UtilsMapModule {
 }
 ```
 
-2. 直接提供Set或者Map类型
+2.直接提供Set或者Map类型
 
 ```java
 @Module
@@ -1741,7 +1735,7 @@ public class UtilsMapModule {
 }
 ```
 
-3. 使用`@MultiBinds`注解
+3.使用`@MultiBinds`注解
 
 ```java
 @Module
@@ -1811,7 +1805,7 @@ public class XXXEntityModule {
 
 官网给出了在Activity中进行依赖注入的步骤，首先过一遍流程，然后再根据代码分析原理：
 
-1. 实现一个Component在自定义Application中注入
+> 1.实现一个Component在自定义Application中注入
 
 ```java
 // AppComponent.java
@@ -1824,7 +1818,7 @@ public interface AppComponent {
 }
 ```
 
-2. 实现一个Subcomponent与需要注入的Activity关联
+> 2.实现一个Subcomponent与需要注入的Activity关联
 
 ```java
 // MainActivitySubComponent.java
@@ -1839,7 +1833,7 @@ public interface MainActivitySubComponent extends AndroidInjector<MainActivity> 
 }
 ```
 
-3. 实现module为你的XXXActivity提供其需要的对象，这一步还有优化的可能，后面介绍
+> 3.实现module为你的XXXActivity提供其需要的对象，这一步还有优化的可能，后面介绍
 
 ```java
 // MainActivityModule.java
@@ -1864,7 +1858,7 @@ public abstract class MainActivityModule {
 }
 ```
 
-4. 自定义Application实现HasAndroidInjector接口，并且进行注入
+> 4.自定义Application实现HasAndroidInjector接口，并且进行注入
 
 ```java
 // MyApplication.java
@@ -1890,7 +1884,7 @@ public class MyApplication extends Application implements HasActivityInjector {
 }
 ```
 
-5. 最终在Activity中的onCreate方法中调用`AndroidInjection.inject(this)`，在super.onCreate()之前
+> 5.最终在Activity中的onCreate方法中调用`AndroidInjection.inject(this)`，在super.onCreate()之前
 
 ```java
 // MainActivity.java
@@ -2475,7 +2469,7 @@ public final class MyApplication_MembersInjector implements MembersInjector<MyAp
 3. MainActivitySubComponent为什么要继承AndroidInjector<MainActivity>，为什么要定义Factory继承AndroidInjector.Factory<MainActivity>？
 4. MainActivityModule的subcomponents为什么是MainActivitySubComponent.class，以及为什么要定义抽象方法bindMainActivityAndroidInjectorFactory？
 
-> 1. 为什么要在自定义Application进行注入，以及为什么要实现接口HasActivityInjector？
+> 1.为什么要在自定义Application进行注入，以及为什么要实现接口HasActivityInjector？
 
 仔细看AndroidInjection.inject(this)的源码不难知道，activityInjector是来自于application的，为什么要依靠application，
 因为当我们获取activityInjector时需要一个全局的类，其他Activity或者Fragment也能访问到，而且必须先于Activity或者Fragment被实例化，
@@ -2484,7 +2478,7 @@ public final class MyApplication_MembersInjector implements MembersInjector<MyAp
 为什么需要实现HasActivityInjector，这是因为application目前只负责Activity的注入，需要DispatchingAndroidInjector<Activity>实例，
 而activityInjector方法可以返回这个实例，`DaggerAppComponent.create().inject(this);`会将DispatchingAndroidInjector实例注入到application中。
 
-> 2. AppComponent的module为什么必须包含AndroidInjectionModule.class？
+> 2.AppComponent的module为什么必须包含AndroidInjectionModule.class？
 
 首先看看AndroidInjectionModule的内容，抽象类加上`@Multibinds`标注的抽象方法，但是看classKeyedInjectorFactories和stringKeyedInjectorFactories两个名字就知道了，在上面的代码DispatchingAndroidInjector.java中出现过。
 
@@ -2522,11 +2516,11 @@ MultiBinds只能用于标注抽象方法，它仅仅是告诉Component我有这�
 
 DispatchingAndroidInjector的构造方法也是通过Inject方式，所以它的参数也必须由Component中的Module来提供，而且其参数是后续初始化过程确定的，所以需要用抽象类来实现，通过抽象类占位保证编译成功。
 
-> 3. MainActivitySubComponent为什么要继承AndroidInjector<MainActivity>，为什么要定义Factory继承AndroidInjector.Factory<MainActivity>？
+> 3.MainActivitySubComponent为什么要继承AndroidInjector<MainActivity>，为什么要定义Factory继承AndroidInjector.Factory<MainActivity>？
 
-我们需要在DaggerAppComponent提供能将实例注入到指定Activity的Provider---比如mainActivitySubComponentFactoryProvider，这个Provider需要能够提供Factory实现create方法，create方法能够返回MainActivitySubComponentImpl实现inject方法，这两个方法都是与MainActivity关联的，所以需要自定义MainActivitySubComponent，其继承的接口AndroidInjector<MainActivity>包括create方法，而且子接口AndroidInjector.Factory<MainActivity>包括inject方法。
+我们需要在DaggerAppComponent提供能将实例注入到指定Activity的Provider---比如mainActivitySubComponentFactoryProvider，这个Provider需要能够提供Factory实现create方法，create方法能够返回MainActivitySubComponentImpl实现inject方法，这两个方法都是与MainActivity关联的，所以需要自定义MainActivitySubComponent，其继承的接口AndroidInjector<MainActivity>包括create方法，而且内部接口AndroidInjector.Factory<MainActivity>包括inject方法。
 
-> 4. MainActivityModule的subcomponents为什么是MainActivitySubComponent.class，以及为什么要定义抽象方法bindMainActivityAndroidInjectorFactory？
+> 4.MainActivityModule的subcomponents为什么是MainActivitySubComponent.class，以及为什么要定义抽象方法bindMainActivityAndroidInjectorFactory？
 
 抽象方法bindMainActivityAndroidInjectorFactory被`@Binds`修饰，提供的是这个方法的参数实例；
 AppComponent依赖MainActivityModule，作为父Component；MainActivitySubComponent作为子Component，用`@Subcomponent`标注；在父Component依赖的MainActivityModule的subcomponents参数加上MainActivitySubComponent，然后就可以在父ComponentAppComponent中请求SubComponent.Factory。此时SubComponent编译时不会生成 DaggerXXComponent，需要通过 父Component 的获取 SubComponent.Factory 方法获取 SubComponent 实例。
@@ -2543,7 +2537,7 @@ AppComponent依赖MainActivityModule，作为父Component；MainActivitySubCompo
 abstract YourActivity contributeYourActivityInjector();
 ```
 
-1. 首先将Activity依赖的module都集中在一个module中ActivityBuilder
+> 1.首先将Activity依赖的module都集中在一个module中ActivityBuilder
 
 ```java
 @Module
@@ -2559,18 +2553,27 @@ public abstract class ActivityBuilder {
 }
 ```
 
-2. 修改AppComponent的modules参数，删掉之前对应Activity的module，增加ActivityBuilder
+> 2.修改AppComponent的modules参数，删掉之前对应Activity的module，增加ActivityBuilder，增加内部接口实现将Application context传出
 
 ```java
 @Singleton
 @Component(modules = {AndroidInjectionModule.class, ActivityBuilder.class, AppModule.class})
 public interface AppComponent {
 
+    @Component.Builder
+    interface Builder {
+
+        @BindsInstance
+        Builder application(Application application);
+
+        AppComponent build();
+
+    }
     void inject(MyApplication application);
 }
 ```
 
-3. 修改MainActivityModule，非抽象类，删掉抽象方法，删掉subcomponents参数，同理对SecondActivityModule
+3. 修改MainActivityModule，非抽象类，删掉抽象方法，删掉subcomponents参数，同理对SecondActivityModule；修改AppModule，增加Context的provide方法
 
 ```java
 @Module
@@ -2589,6 +2592,22 @@ public class SecondActivityModule {
         return 123;
     }
 }
+
+@Module
+public class AppModule {
+
+    @Provides
+    @Singleton
+    String provideGlobalInfo() {
+        return "This is global info";
+    }
+
+    @Provides
+    @Singleton
+    Context provideContext(Application application) {
+        return application;
+    }
+}
 ```
 
 4. 在Activity中注入，Application不变
@@ -2602,6 +2621,9 @@ public class MainActivity extends AppCompatActivity {
     @Inject
     String info;
 
+    @Inject
+    Context context;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         AndroidInjection.inject(this);
@@ -2611,6 +2633,7 @@ public class MainActivity extends AppCompatActivity {
 
         String text = entity.showMessage() + " - " + info;
         Log.i("aaaa", text);
+        Log.i("aaaa", context.toString());
         startActivity(new Intent(MainActivity.this, SecondActivity.class));
     }
 }
@@ -2623,6 +2646,9 @@ public class SecondActivity extends AppCompatActivity {
     @Inject
     Integer num;
 
+    @Inject
+    Context context;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         AndroidInjection.inject(this);
@@ -2630,6 +2656,7 @@ public class SecondActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_second);
         Log.i("aaaa", info + num);
+        Log.i("aaaa", context.toString());
     }
 }
 
@@ -2641,7 +2668,10 @@ public class MyApplication extends Application implements HasActivityInjector {
     @Override
     public void onCreate() {
         super.onCreate();
-        DaggerAppComponent.create()
+        DaggerAppComponent
+                .builder()
+                .application(this)
+                .build()
                 .inject(this);
     }
 
@@ -2651,6 +2681,8 @@ public class MyApplication extends Application implements HasActivityInjector {
     }
 }
 ```
+
+这样我们就可以通过依赖注入的方式将全局Context注入到所有的Activity中，看log也可以发现两个context是相同的。
 
 ### 2.3 Injecting Fragment objects
 
