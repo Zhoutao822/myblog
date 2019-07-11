@@ -1266,9 +1266,112 @@ public class MainActivity extends AppCompatActivity implements PopupMenu.OnMenuI
     }
 ```
 
-第二个例子，禁止ViewPager左右滑动，首先需要明白一个问题，为什么ViewPager可以使页面左右滑动，如果ViewPager中的Fragment中也包含一个可以左右滑动的控件，那么滑动会产生冲突吗？
+第二个例子，禁止ViewPager左右滑动，首先需要明白一个问题，为什么ViewPager可以使页面左右滑动，如果ViewPager中的Fragment中也包含一个控件CustomTextView，那么滑动会产生冲突吗？
 
-首先看ViewPager的源码
+首先看一下log日志，这是在自定义的CustomViewPager和CustomTextView中与TouchEvent相关的代码执行顺序
+
+```log
+CustomViewPager:    dispatchTouchEvent    - ACTION_DOWN
+CustomViewPager:    onInterceptTouchEvent - ACTION_DOWN
+CustomTextView:     dispatchTouchEvent    - ACTION_DOWN
+CustomTextView:     onTouchEvent          - ACTION_DOWN
+CustomViewPager:    onTouchEvent          - ACTION_DOWN
+CustomViewPager:    dispatchTouchEvent    - ACTION_MOVE
+CustomViewPager:    onTouchEvent          - ACTION_MOVE
+CustomViewPager:    dispatchTouchEvent    - ACTION_UP
+CustomViewPager:    onTouchEvent          - ACTION_UP
+```
+
+下面是两个自定义的代码
+
+```java
+public class CustomViewPager extends ViewPager {
+    private static final String TAG = "aaaa-CustomViewPager";
+
+    private boolean enabled;
+
+    public CustomViewPager(@NonNull Context context) {
+        super(context);
+        this.enabled = true;
+    }
+
+    public CustomViewPager(Context context, AttributeSet attrs) {
+        super(context, attrs);
+        this.enabled = true;
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        Log.i(TAG, "dispatchTouchEvent - " + " - " + ev.toString());
+        return super.dispatchTouchEvent(ev);
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (this.enabled) {
+            Log.i(TAG, "onTouchEvent - " + " - " + event.toString());
+            return super.onTouchEvent(event);
+        }
+        return false;
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent event) {
+        if (this.enabled) {
+            Log.i(TAG, "onInterceptTouchEvent - " + " - " + event.toString());
+            return super.onInterceptTouchEvent(event);
+        }
+        return false;
+    }
+
+    public void setPagingEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+}
+
+public class CustomTextView extends AppCompatTextView {
+
+    private static final String TAG = "aaaa-CustomTextView";
+
+    public CustomTextView(Context context) {
+        super(context);
+    }
+
+    public CustomTextView(Context context, AttributeSet attrs) {
+        super(context, attrs);
+    }
+
+    public CustomTextView(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        Log.i(TAG, "dispatchTouchEvent - " + " - " + event.toString());
+        return super.dispatchTouchEvent(event);
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        Log.i(TAG, "onTouchEvent - " + " - " + event.toString());
+        return super.onTouchEvent(event);
+    }
+}
+```
+
+对于ACTION_DOWN事件来说，事件传递流程为：
+
+1. CustomViewPager的dispatchTouchEvent（应该是来自于PhoneWindow/DecorView），调用`super.dispatchTouchEvent(ev)`，即ViewGroup的dispatchTouchEvent方法；
+2. 在上面ViewGroup的源码中我们知道，ViewGroup的dispatchTouchEvent方法中调用了onInterceptTouchEvent方法`intercepted = onInterceptTouchEvent(ev);`，由于我们在CustomViewPager中重写了onInterceptTouchEvent方法，所以会回到CustomViewPager的onInterceptTouchEvent方法；
+3. 默认情况下this.enabled为true，所以我们开始调用`super.onInterceptTouchEvent(event)`，此时super是ViewPager的onInterceptTouchEvent方法；
+4. 再看ViewPager的源码，对于ACTION_DOWN事件来说，onInterceptTouchEvent返回false，所以CustomViewPager的onInterceptTouchEvent方法直接返回false，又回到ViewGroup的dispatchTouchEvent方法中；
+5. 当`intercepted = onInterceptTouchEvent(ev);`中intercepted为false时，会执行子view的dispatchTouchEvent方法，这时到了CustomTextView的dispatchTouchEvent方法；
+6. CustomTextView的dispatchTouchEvent方法默认调用`super.dispatchTouchEvent(event)`，即View的dispatchTouchEvent方法，而从View的源码中可知其调用onTouchEvent方法，而我们的CustomTextView重写了onTouchEvent方法，但是此方法又返回到TextView的onTouchEvent方法中，最终还是回到View的onTouchEvent方法，对于ACTION_DOWN事件来说，最终CustomTextView的onTouchEvent方法返回false，则CustomTextView的super以及CustomTextView的dispatchTouchEvent方法返回false，对应5中，如果子view的dispatchTouchEvent方法返回false，则第5步中ViewGroup会执行`super.dispatchTouchEvent(event)`，即ViewGroup的父类View的dispatchTouchEvent方法，此处的View不再是子view，而是作为CustomViewPager，因为CustomViewPager重写了onTouchEvent方法，所以View的dispatchTouchEvent方法中调用的onTouchEvent方法为CustomViewPager的onTouchEvent方法，而CustomViewPager的onTouchEvent方法调用`super.onTouchEvent(event)`，即ViewPager的onTouchEvent方法；
+7. ViewPager的onTouchEvent方法即最终实现滑动效果的地方，根据代码可知，只有在没有adapter或者滑动到最边缘的页面才会返回false，其他情况返回true；
+8. ViewPager的onTouchEvent方法返回true即处理了ACTION_DOWN事件，那么依次CustomViewPager的onTouchEvent方法返回true，CustomViewPager的dispatchTouchEvent方法返回true，至此ACTION_DOWN事件的处理结束了。
+
+
+
 
 ```java
 // ViewPager.java 从onInterceptTouchEvent第一句注释就知道了，ViewPager就是通过onInterceptTouchEvent拦截实现的滑动
@@ -1285,7 +1388,7 @@ public class MainActivity extends AppCompatActivity implements PopupMenu.OnMenuI
         final int action = ev.getAction() & MotionEvent.ACTION_MASK;
 
         // Always take care of the touch gesture being complete.
-        // 首先看到ACTION_CANCEL和ACTION_UP没有做什么特别的判断直接放行了，不会拦截
+        // 首先看到ACTION_CANCEL和ACTION_UP没有做什么特别的判断直接放行了，直接返回false
         if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP) {
             // Release the drag.
             if (DEBUG) Log.v(TAG, "Intercept done!");
