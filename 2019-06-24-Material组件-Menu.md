@@ -1314,7 +1314,8 @@ public class CustomViewPager extends ViewPager {
         }
         return false;
     }
-
+// 根据后面的分析可知，对于ACTION_DOWN事件来说，super.onInterceptTouchEvent(event)默认返回false
+// 这段代码看似都是返回false，对结果没有影响，但是实际上将onInterceptTouchEvent的调用从ViewGroup转到ViewPager中
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
         if (this.enabled) {
@@ -1365,206 +1366,96 @@ public class CustomTextView extends AppCompatTextView {
 2. 在上面ViewGroup的源码中我们知道，ViewGroup的dispatchTouchEvent方法中调用了onInterceptTouchEvent方法`intercepted = onInterceptTouchEvent(ev);`，由于我们在CustomViewPager中重写了onInterceptTouchEvent方法，所以会回到CustomViewPager的onInterceptTouchEvent方法；
 3. 默认情况下this.enabled为true，所以我们开始调用`super.onInterceptTouchEvent(event)`，此时super是ViewPager的onInterceptTouchEvent方法；
 4. 再看ViewPager的源码，对于ACTION_DOWN事件来说，onInterceptTouchEvent返回false，所以CustomViewPager的onInterceptTouchEvent方法直接返回false，又回到ViewGroup的dispatchTouchEvent方法中；
-5. 当`intercepted = onInterceptTouchEvent(ev);`中intercepted为false时，会执行子view的dispatchTouchEvent方法，这时到了CustomTextView的dispatchTouchEvent方法；
+5. 当`intercepted = onInterceptTouchEvent(ev);`中intercepted为false时，会执行子view的dispatchTouchEvent方法，子view即CustomTextView的dispatchTouchEvent方法；
 6. CustomTextView的dispatchTouchEvent方法默认调用`super.dispatchTouchEvent(event)`，即View的dispatchTouchEvent方法，而从View的源码中可知其调用onTouchEvent方法，而我们的CustomTextView重写了onTouchEvent方法，但是此方法又返回到TextView的onTouchEvent方法中，最终还是回到View的onTouchEvent方法，对于ACTION_DOWN事件来说，最终CustomTextView的onTouchEvent方法返回false，则CustomTextView的super以及CustomTextView的dispatchTouchEvent方法返回false，对应5中，如果子view的dispatchTouchEvent方法返回false，则第5步中ViewGroup会执行`super.dispatchTouchEvent(event)`，即ViewGroup的父类View的dispatchTouchEvent方法，此处的View不再是子view，而是作为CustomViewPager，因为CustomViewPager重写了onTouchEvent方法，所以View的dispatchTouchEvent方法中调用的onTouchEvent方法为CustomViewPager的onTouchEvent方法，而CustomViewPager的onTouchEvent方法调用`super.onTouchEvent(event)`，即ViewPager的onTouchEvent方法；
 7. ViewPager的onTouchEvent方法即最终实现滑动效果的地方，根据代码可知，只有在没有adapter或者滑动到最边缘的页面才会返回false，其他情况返回true；
 8. ViewPager的onTouchEvent方法返回true即处理了ACTION_DOWN事件，那么依次CustomViewPager的onTouchEvent方法返回true，CustomViewPager的dispatchTouchEvent方法返回true，至此ACTION_DOWN事件的处理结束了。
 
+对于ACTION_MOVE和ACTION_UP事件来说（这两个事件分发流程基本相同），事件传递流程为：
 
+1. CustomViewPager的dispatchTouchEvent（应该是来自于PhoneWindow/DecorView），调用`super.dispatchTouchEvent(ev)`，即ViewGroup的dispatchTouchEvent方法；
+2. ViewGroup的dispatchTouchEvent方法中intercepted为true，拦截了ACTION_MOVE事件，由自身处理，即调用CustomViewPager的onTouchEvent方法；
+3. CustomViewPager的onTouchEvent方法调用`super.onTouchEvent(event)`，即ViewPager的onTouchEvent方法，在这里实现滑动的效果，根据代码可知，只有在没有adapter或者滑动到最边缘的页面才会返回false，其他情况返回true；
+4. 然后依次CustomViewPager的onTouchEvent返回true，CustomViewPager的dispatchTouchEvent方法返回true。
 
+简而言之，事件分发就是一系列的dispatchTouchEvent、onInterceptTouchEvent和onTouchEvent方法的相互调用，首先需要明确地就是最终实现滑动效果、点击效果的都是各个控件的onTouchEvent方法，dispatchTouchEvent仅用作事件分发的开始，而onInterceptTouchEvent方法用于终止事件向子控件传递。
 
-```java
-// ViewPager.java 从onInterceptTouchEvent第一句注释就知道了，ViewPager就是通过onInterceptTouchEvent拦截实现的滑动
-// ViewPager主动调用onInterceptTouchEvent将ACTION_MOVE的事件拦截，而对其它事件进行其他处理，从而实现滑动操作仅能在ViewPager中处理
+以上面的代码为例可以得到一些结论：
 
-    @Override
-    public boolean onInterceptTouchEvent(MotionEvent ev) {
-        /*
-         * This method JUST determines whether we want to intercept the motion.
-         * If we return true, onMotionEvent will be called and we do the actual
-         * scrolling there.
-         */
+1. ViewPager的onInterceptTouchEvent一般对ACTION_DOWN事件返回false，即不会对ACTION_DOWN进行拦截，那么ACTION_DOWN必定传到子view中；
+2. 如果ViewPager的子view无法在onTouchEvent中进行处理，比如这里的CustomTextView，对于ACTION_DOWN事件，CustomTextView的onTouchEvent返回false（为什么无法处理ACTION_DOWN，从源码中可知是由于CustomTextView的clickable为false，所以返回false），所以CustomTextView的dispatchTouchEvent方法返回false，相当于告诉父view不要再传给我ACTION_DOWN了，我没法处理；
+3. 如果ViewPager的子view的dispatchTouchEvent方法返回false，那么ViewPager就会调用自己的onTouchEvent来处理，ViewPager的onTouchEvent可以处理ACTION_DOWN事件，并记录了点击的位置，然后返回true，从而ViewPager的dispatchTouchEvent方法返回true，ACTION_DOWN事件结束；
+4. 紧接着ACTION_DOWN事件的必定是ACTION_MOVE或ACTION_UP，以ACTION_MOVE为例，同样是从ViewPager的dispatchTouchEvent方法开始，此时没有调用onInterceptTouchEvent方法，而是直接执行onTouchEvent方法，即根据ACTION_MOVE事件带的参数实现滑动效果，然后返回true；
+5. 紧接着ACTION_MOVE的必然是ACTION_UP，流程同4；
+6. 当ViewGroup的onTouchEvent方法可以处理ACTION_DOWN事件时，即onTouchEvent方法返回true，则此ViewGroup的onInterceptTouchEvent方法不再执行（对的，就算不执行也可以拦截事件），同时后续事件被拦截，经由此ViewGroup的onTouchEvent处理。
 
-        final int action = ev.getAction() & MotionEvent.ACTION_MASK;
+综上所述，如果ViewPager的子view无法处理ACTION_DOWN事件，那么ViewPager自己就会处理ACTION_DOWN事件，并在后续事件传递过程中拦截（不是通过onInterceptTouchEvent方法），后续的ACTION_MOVE或ACTION_UP由ViewPager进行处理，在ViewPager的onTouchEvent中实现了滑动的效果。
 
-        // Always take care of the touch gesture being complete.
-        // 首先看到ACTION_CANCEL和ACTION_UP没有做什么特别的判断直接放行了，直接返回false
-        if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP) {
-            // Release the drag.
-            if (DEBUG) Log.v(TAG, "Intercept done!");
-            resetTouch();
-            return false;
-        }
+如果我们在ViewPager中加上HorizontalScrollView，并加上几个CustomTextView，会产生怎样的效果呢
 
-        // Nothing more to do here if we have decided whether or not we
-        // are dragging.
-        // 通过mIsBeingDragged判断是否要将事件拦截，这个参数在后面代码中被赋值，我们可以发现ACTION_DOWN是不在这里判断的，因为当手指
-        // 点击下去的那一刻，最终需要传递什么事件是不明确的，可能是ACTION_DOWN加ACTION_UP，也可能是ACTION_DOWN加ACTION_MOVE加ACTION_UP
-        if (action != MotionEvent.ACTION_DOWN) {
-            if (mIsBeingDragged) {
-                // 一旦后面的判断明确，那么mIsBeingDragged的值也是确定的，从而实现事件拦截
-                if (DEBUG) Log.v(TAG, "Intercept returning true!");
-                return true;
-            }
-            if (mIsUnableToDrag) {
-                if (DEBUG) Log.v(TAG, "Intercept returning false!");
-                return false;
-            }
-        }
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
-        switch (action) {
-            case MotionEvent.ACTION_MOVE: {
-                /*
-                 * mIsBeingDragged == false, otherwise the shortcut would have caught it. Check
-                 * whether the user has moved far enough from his original down touch.
-                 */
+    <us.zoom.videomeetings.viewpagerdemo.custom.CustomHorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
 
-                /*
-                * Locally do absolute value. mLastMotionY is set to the y value
-                * of the down event.
-                */
-                final int activePointerId = mActivePointerId;
-                if (activePointerId == INVALID_POINTER) {
-                    // If we don't have a valid id, the touch down wasn't on content.
-                    break;
-                }
+        <us.zoom.videomeetings.viewpagerdemo.custom.CustomLinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
 
-                final int pointerIndex = ev.findPointerIndex(activePointerId);
-                final float x = ev.getX(pointerIndex);
-                final float dx = x - mLastMotionX;
-                final float xDiff = Math.abs(dx);
-                final float y = ev.getY(pointerIndex);
-                final float yDiff = Math.abs(y - mInitialMotionY);
-                if (DEBUG) Log.v(TAG, "Moved x to " + x + "," + y + " diff=" + xDiff + "," + yDiff);
-                // ACTION_MOVE这里是一个比较关键的地方，canScroll会判断当前坐标是否存在可以滑动的子view，如果有，那么
-                // ViewPager不拦截
-                if (dx != 0 && !isGutterDrag(mLastMotionX, dx)
-                        && canScroll(this, false, (int) dx, (int) x, (int) y)) {
-                    // Nested view has scrollable area under this point. Let it be handled there.
-                    mLastMotionX = x;
-                    mLastMotionY = y;
-                    mIsUnableToDrag = true;
-                    return false;
-                }
-                // 反之，如果不存在可以滑动的子view，那么将mIsBeingDragged置为true，从而对后面所有的ACTION_MOVE进行拦截
-                if (xDiff > mTouchSlop && xDiff * 0.5f > yDiff) {
-                    if (DEBUG) Log.v(TAG, "Starting drag!");
-                    mIsBeingDragged = true;
-                    requestParentDisallowInterceptTouchEvent(true);
-                    setScrollState(SCROLL_STATE_DRAGGING);
-                    mLastMotionX = dx > 0
-                            ? mInitialMotionX + mTouchSlop : mInitialMotionX - mTouchSlop;
-                    mLastMotionY = y;
-                    setScrollingCacheEnabled(true);
-                } else if (yDiff > mTouchSlop) {
-                    // The finger has moved enough in the vertical
-                    // direction to be counted as a drag...  abort
-                    // any attempt to drag horizontally, to work correctly
-                    // with children that have scrolling containers.
-                    if (DEBUG) Log.v(TAG, "Starting unable to drag!");
-                    mIsUnableToDrag = true;
-                }
-                if (mIsBeingDragged) {
-                    // Scroll to follow the motion event
-                    if (performDrag(x)) {
-                        ViewCompat.postInvalidateOnAnimation(this);
-                    }
-                }
-                break;
-            }
+            <us.zoom.videomeetings.viewpagerdemo.custom.CustomTextView
+                android:id="@+id/custom_tv"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_margin="40dp"
+                android:background="@color/colorPrimary"
+                android:padding="40dp"
+                android:text="Fragment"
+                android:textSize="30sp" />
 
-            case MotionEvent.ACTION_DOWN: {
-                /*
-                 * Remember location of down touch.
-                 * ACTION_DOWN always refers to pointer index 0.
-                 */
-                // ACTION_DOWN没有过多的操作，只是记录了点击的位置，对一些参数初始化
-                mLastMotionX = mInitialMotionX = ev.getX();
-                mLastMotionY = mInitialMotionY = ev.getY();
-                mActivePointerId = ev.getPointerId(0);
-                mIsUnableToDrag = false;
+            <us.zoom.videomeetings.viewpagerdemo.custom.CustomTextView
+                android:id="@+id/custom_tv2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_margin="40dp"
+                android:background="@color/colorPrimary"
+                android:padding="40dp"
+                android:text="Fragment"
+                android:textSize="30sp" />
 
-                mIsScrollStarted = true;
-                mScroller.computeScrollOffset();
-                if (mScrollState == SCROLL_STATE_SETTLING
-                        && Math.abs(mScroller.getFinalX() - mScroller.getCurrX()) > mCloseEnough) {
-                    // Let the user 'catch' the pager as it animates.
-                    mScroller.abortAnimation();
-                    mPopulatePending = false;
-                    populate();
-                    mIsBeingDragged = true;
-                    requestParentDisallowInterceptTouchEvent(true);
-                    setScrollState(SCROLL_STATE_DRAGGING);
-                } else {
-                    completeScroll(false);
-                    mIsBeingDragged = false;
-                }
+        </us.zoom.videomeetings.viewpagerdemo.custom.CustomLinearLayout>
 
-                if (DEBUG) {
-                    Log.v(TAG, "Down at " + mLastMotionX + "," + mLastMotionY
-                            + " mIsBeingDragged=" + mIsBeingDragged
-                            + "mIsUnableToDrag=" + mIsUnableToDrag);
-                }
-                break;
-            }
+    </us.zoom.videomeetings.viewpagerdemo.custom.CustomHorizontalScrollView>
 
-            case MotionEvent.ACTION_POINTER_UP:
-                onSecondaryPointerUp(ev);
-                break;
-        }
-
-        if (mVelocityTracker == null) {
-            mVelocityTracker = VelocityTracker.obtain();
-        }
-        mVelocityTracker.addMovement(ev);
-
-        /*
-         * The only time we want to intercept motion events is if we are in the
-         * drag mode.
-         */
-        // mIsBeingDragged的值代表了ACTION_MOVE是否被拦截
-        return mIsBeingDragged;
-    }
+</LinearLayout>
 ```
 
-综上所述，ViewPager通过令onInterceptTouchEvent返回true，使得可以实现左右滑动的效果，那么如果onInterceptTouchEvent返回false，那么事件传递到子view中，则左右滑动效果消失
+CustomHorizontalScrollView和CustomLinearLayout都是直接继承，仅重写dispatchTouchEvent、onTouchEvent、onInterceptTouchEvent方法，加上log，这里就不加代码了，基本同上。
 
-```java
-public class CustomViewPager extends ViewPager {
-    // CustomViewPager control scroll enable
-    private boolean enabled;
+{% asset_img viewpager.gif %}
 
-    public CustomViewPager(@NonNull Context context) {
-        super(context);
-        this.enabled = true;
-    }
+在上述的演示效果中可以发现，如果滑动的位置是TextView，则ViewPager的左右滑动似乎被卡住了，但是偶尔可以切换，而且就算滑动到第二个TextView的边缘也不能切换fragment；如果滑动的位置是下方空白区域则ViewPager可以正常滑动。
 
-    public CustomViewPager(Context context, AttributeSet attrs) {
-        super(context, attrs);
-        this.enabled = true;
-    }
+根据log以及上文的分析可知，ViewPager左右滑动被卡住的原因是：
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (this.enabled) {
-            return super.onTouchEvent(event);
-        }
-        return false;
-    }
+1. ACTION_DOWN事件向下层层传递到CustomTextView，结果发现CustomTextView的onTouchEvent无法处理返回了false，然后向上层层传递直到CustomHorizontalScrollView发现自己可以处理ACTION_DOWN事件，于是其onTouchEvent返回了true，则CustomHorizontalScrollView的dispatchTouchEvent方法返回true，从而CustomViewPager的onTouchEvent无法执行；
+2. 紧接着ACTION_MOVE事件向下层层传递到CustomHorizontalScrollView，发现CustomHorizontalScrollView之前处理了ACTION_DOWN，那么后续所有事件都被CustomHorizontalScrollView拦截，通过其onTouchEvent处理，并返回true，则CustomHorizontalScrollView的dispatchTouchEvent方法返回true，从而CustomViewPager的onTouchEvent无法执行；
+3. ACTION_UP事件同2。
 
-    @Override
-    public boolean onInterceptTouchEvent(MotionEvent event) {
-        if (this.enabled) {
-            return super.onInterceptTouchEvent(event);
-        }
-        return false;
-    }
+经过上面的分析知道了其实是CustomHorizontalScrollView能够处理所有事件，从而导致CustomViewPager无法执行onTouchEvent，因此ViewPager无法左右滑动。
 
-    public void setPagingEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-}
-```
+
+
+
+
 
 
 
