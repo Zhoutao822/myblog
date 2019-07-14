@@ -10,6 +10,7 @@ tags:
 - ContextMenu
 - PopupMenu
 - RecyclerView
+- ViewPager
 - onClick
 - onLongClick
 - onTouchEvent
@@ -23,6 +24,7 @@ tags:
 > [图解 Android 事件分发机制](https://www.jianshu.com/p/e99b5e8bd67b)
 > [Android事件分发机制 详解攻略](https://blog.csdn.net/carson_ho/article/details/54136311)
 > [Activity、View、Window的理解一篇文章就够了](https://juejin.im/entry/596329686fb9a06bc903b6fd)
+> [ViewPager 与 HorizontalScrollView 滑动冲突问题](https://www.jianshu.com/p/2aeb2d10a831)
 
 Menu，不同于Button、TextView之类的控件，它不需要在布局文件中指定位置，它是用于提供给用户额外的操作选择，因此不必局限于某一个固定位置，它可以搭配任何控件。
 
@@ -1452,9 +1454,180 @@ CustomHorizontalScrollView和CustomLinearLayout都是直接继承，仅重写dis
 
 经过上面的分析知道了其实是CustomHorizontalScrollView能够处理所有事件，从而导致CustomViewPager无法执行onTouchEvent，因此ViewPager无法左右滑动。
 
+因此我们可以简单完成几个对滑动控制的需求
 
+### 4.1 禁用ViewPager的滑动，子view可以滑动
 
+这个需求是为了解决上面提到的ViewPager偶尔可以滑动的问题，很显然这里可能是事件传递过程中触发了某种条件导致事件最终由ViewPager的onTouchEvent方法处理，我们要防止这种情况发生。解决的方法是CustomViewPager的onTouchEvent返回false（确保CustomViewPager不会处理滑动事件），同时可以在CustomViewPager的onInterceptTouchEvent返回false（可选，但是可以保证CustomViewPager不对事件进行拦截）。
 
+### 4.2 ViewPager仅在子view滑动到左右边界时可以滑动
+
+直接看代码
+
+```java
+public class CustomHorizontalScrollView extends HorizontalScrollView {
+
+    private static final String TAG = CustomHorizontalScrollView.class.getSimpleName();
+
+    public CustomHorizontalScrollView(Context context) {
+        super(context);
+    }
+
+    public CustomHorizontalScrollView(Context context, AttributeSet attrs) {
+        super(context, attrs);
+    }
+
+    public CustomHorizontalScrollView(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+    }
+
+    public CustomHorizontalScrollView(Context context, AttributeSet attrs, int defStyleAttr, int defStyleRes) {
+        super(context, attrs, defStyleAttr, defStyleRes);
+    }
+
+    /**
+     * 可以在此处理冲突
+     *
+     * @param ev
+     * @return
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        // 还没滑到右边，请求父控件不要拦截我的事件，事件自己处理 true ；已经滑到右边，则事件交由父控件处理 false。
+        // getParent().requestDisallowInterceptTouchEvent(!isScrollToRight());
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /**
+     * 也可以在此处理冲突
+     *
+     * @param ev
+     * @return
+     */
+    @Override
+    public boolean onTouchEvent(MotionEvent ev) {
+        switch (ev.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                break;
+            // 处理的逻辑是在ACTION_MOVE事件上，如果滑动到最左或最右边则调用
+            // getParent().requestDisallowInterceptTouchEvent(false)
+            // 那么HorizontalScrollView的父view会拦截掉ACTION_MOVE事件，
+            // 即ViewPager拦截ACTION_MOVE事件，由他的onTouchEvent处理
+            case MotionEvent.ACTION_MOVE:
+                if (isScrollToLeft() || isScrollToRight()) {
+                    Log.e(TAG, "滑到" + (isScrollToLeft() ? "左边" : "右边"));
+                    // 把事件交给父控件处理，例如：viewpager滑动
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                }
+                break;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                // 请求父控件可以拦截事件
+                getParent().requestDisallowInterceptTouchEvent(false);
+                break;
+
+            default:
+        }
+        return super.onTouchEvent(ev);
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        return super.onInterceptTouchEvent(ev);
+    }
+
+    /**
+     * 是否已经滑到了最右边
+     *
+     * @return
+     */
+    private boolean isScrollToRight() {
+        // getScrollX得到View的最左边的位置，若HorizontalScrollView滑到最右边，则为负值；
+        // getScrollX() + getWidth()为最右边的位置
+        // getChildAt(getChildCount() - 1).getRight()恰好得到子view的最右边的位置
+        return getChildAt(getChildCount() - 1).getRight() == getScrollX() + getWidth();
+    }
+
+    /**
+     * 是否已经滑到了最左边
+     *
+     * @return
+     */
+    private boolean isScrollToLeft() {
+        return getScrollX() == 0;
+    }
+}
+```
+
+**滑动冲突的解决方式有两种**：
+
+> 1.外部拦截法：触摸事件都先经过父容器的拦截处理，如果父容器需要此事件就拦截，不需要就不拦截（此方法符合view事件分发机制），这样就可以解决滑动冲突问题。需要重写onInterceptTouchEvent方法，伪代码如下：
+
+```java
+@Override
+    public boolean onInterceptTouchEvent(MotionEvent ev)
+    {
+        boolean intercept = false;
+        switch (ev.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+              // 不能拦截，否则无法传递事件给子元素
+                intercept = false;
+                break;
+
+            case MotionEvent.ACTION_MOVE:
+             // 针对不同的滑动冲突，只需要修改这个条件即可，其它均不需做修改并且也不能修改
+                if (滑动事件交由父容器处理)
+                {
+                    // 拦截事件
+                    intercept = true;
+                }
+                else
+                {
+                    // 不拦截事件
+                    intercept = false;
+                }
+                break;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                // 不拦截，否则子元素可能无法接收到这两个事件
+                intercept = false;
+                break;
+
+            default:
+        }
+        return intercept;
+    }
+```
+
+> 2.内部拦截法：父容器不拦截任何事件，所有的事件都传递给子元素，如果子元素需要此事件就直接消耗掉，否则就交由父容器进行处理，这种方法和android中的事件分发机制不一致，需要配合`requestDisallowInterceptTouchEvent`方法才能正常工作，使用越来较外部拦截法稍显复杂。我们可以修改`dispatchTouchEvent`方法或者onTouchEvent方法来达到目的。伪代码如下：
+
+```java
+@Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        switch (ev.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                getParent().requestDisallowInterceptTouchEvent(true);
+                break;
+
+            case MotionEvent.ACTION_MOVE:
+            // 针对不同的滑动冲突，只需要修改这个条件即可，其它均不需做修改并且也不能修改
+                if (父容器需要此类触摸事件)
+                {
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                }
+                break;
+
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                break;
+
+            default:
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+```
 
 
 
