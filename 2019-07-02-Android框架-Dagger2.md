@@ -269,7 +269,17 @@ public class Utils {
 
 `MainActivityComponent.java`和`MainActivity.java`不用修改任何代码，那不就意味着我们解决了前面注入产生的修改代码的问题吗，因为没有new对象的代码；而且ToastUtils在Utils中也不是通过new对象产生的，而是层层注解注入的。
 
-此时再次看一下生成的代码文件`DaggerMainActivityComponent.java`、`MainActivity_MembersInjector.java`、`Utils_Factory.java`、`ToastUtils_Factory.java`
+
+此时再次看一下生成的代码文件：
+
+`DaggerMainActivityComponent.java`
+
+`MainActivity_MembersInjector.java`
+
+`Utils_Factory.java`
+
+`ToastUtils_Factory.java`：
+
 
 ```java
 public final class DaggerMainActivityComponent implements MainActivityComponent {
@@ -313,14 +323,14 @@ public final class DaggerMainActivityComponent implements MainActivityComponent 
 
 结合源码分析可知
 
-1. `@Inject`标注在构造器上的含义包括：
+> 1.`@Inject`标注在构造器上的含义包括：
 
 * 告诉Dagger2可以使用这个构造器构建对象。如ToastUtils类
 * 注入构造器所需要的参数的依赖。 如Utils类，构造上的ToastUtils会被注入。
 
 构造器注入的局限：如果有多个构造器，我们只能标注其中一个，无法标注多个。
 
-2. `@Component`一般有两种方式定义方法
+> 2.`@Component`一般有两种方式定义方法
 
 * `void inject(目标类 obj);`Dagger2会从目标类开始查找`@Inject`注解，自动生成依赖注入的代码，调用inject可完成依赖的注入。
 * `Object getObj();` 如：`Utils getUtils();`
@@ -450,7 +460,13 @@ public class MainActivity extends AppCompatActivity {
 
 通过修改`AbstractUtilsModule`中`provideDataUtils`方法返回的对象，我们可以控制抽象类的具体子类是DBUtils还是ApiUtils，而主体代码不需要改动。
 
-此时代码分析包括`DaggerMainActivityComponent.java`、`AbstractUtilsModule_ProvideDataUtilsFactory.java`、`MainActivity_MembersInjector.java`
+生成代码分析包括：
+
+`DaggerMainActivityComponent.java`
+
+`AbstractUtilsModule_ProvideDataUtilsFactory.java`
+
+`MainActivity_MembersInjector.java`：
 
 ```java
 public final class DaggerMainActivityComponent implements MainActivityComponent {
@@ -2573,7 +2589,7 @@ public interface AppComponent {
 }
 ```
 
-3. 修改MainActivityModule，非抽象类，删掉抽象方法，删掉subcomponents参数，同理对SecondActivityModule；修改AppModule，增加Context的provide方法
+> 3.修改MainActivityModule，非抽象类，删掉抽象方法，删掉subcomponents参数，同理对SecondActivityModule；修改AppModule，增加Context的provide方法
 
 ```java
 @Module
@@ -2610,7 +2626,7 @@ public class AppModule {
 }
 ```
 
-4. 在Activity中注入，Application不变
+> 4.在Activity中注入，Application不变
 
 ```java
 public class MainActivity extends AppCompatActivity {

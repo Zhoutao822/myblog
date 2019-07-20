@@ -212,7 +212,7 @@ ContextMenu可以在一个Activity中有多个，甚至可以在RecyclerView中�
 
 使用ContextMenu的三个步骤：
 
-1. 注册，更确切的说法是关联，即指定需要生成ContextMenu的控件，一句话解决
+> 1.注册，更确切的说法是关联，即指定需要生成ContextMenu的控件，一句话解决
 
 ```java
         registerForContextMenu(recyclerView); // 对RecyclerView也是一样，但是这里我用的是自定义RecyclerView，稍后解释
@@ -220,7 +220,7 @@ ContextMenu可以在一个Activity中有多个，甚至可以在RecyclerView中�
         registerForContextMenu(button1);
 ```
 
-2. 重写onCreateContextMenu方法，生成Menu
+> 2.重写onCreateContextMenu方法，生成Menu
 
 ```java
     @Override
@@ -252,7 +252,7 @@ ContextMenu可以在一个Activity中有多个，甚至可以在RecyclerView中�
     }
 ```
 
-3. 重写onContextItemSelected方法，点击事件响应
+> 3.重写onContextItemSelected方法，点击事件响应
 
 ```java
     @Override
@@ -270,7 +270,7 @@ ContextMenu可以在一个Activity中有多个，甚至可以在RecyclerView中�
     }
 ```
 
-**自定义的RecyclerViewWithContextMenu**
+> 4. **自定义的RecyclerViewWithContextMenu**
 
 ```java
 public class RecyclerViewWithContextMenu extends RecyclerView {
@@ -388,7 +388,13 @@ public class MainActivity extends AppCompatActivity implements PopupMenu.OnMenuI
 
 * 为什么ContextMenu只需要注册就可以使用，而不是new一个对象出来，类似于PopupMenu？
 
-首先看与ContextMenu相关的几个方法`registerForContextMenu`、`onCreateContextMenu`、`onContextItemSelected`
+首先看与ContextMenu相关的几个方法：
+
+`registerForContextMenu`
+
+`onCreateContextMenu`
+
+`onContextItemSelected`
 
 ```java
 // Activity.java registerForContextMenu这个方法仅仅是对view进行了注册listener
@@ -545,7 +551,7 @@ public class MainActivity extends AppCompatActivity implements PopupMenu.OnMenuI
        });
 ```
 
-结果也是很明显的，测试以下就知道这里返回true，那么button的ContextMenu无法触发，Toast会正常产生；返回false，那么button的Toast会产生，而且ContextMenu也会产生，onLongClick方法在onCreateContextMenu方法之前执行。
+结果也是很明显的，测试一下就知道这里返回true，那么button的ContextMenu无法触发，Toast会正常产生；返回false，那么button的Toast会产生，而且ContextMenu也会产生，onLongClick方法在onCreateContextMenu方法之前执行。
 
 由此产生了另一个问题，onLongClick方法是如何产生的，解决了这个问题，那么所有的问题都将迎刃而解。
 

@@ -66,7 +66,7 @@ dependencies {
 
 根据官网说明，BottomSheetDialog有两种使用方式（这里很多博客没有说明就直接给代码了），一种是Persistent，另一种是Modal，简而言之就是前者是固定的BottomSheetDialog，后者是动态调用的。
 
-### Persistent BottomSheetDialog
+### 2.1 Persistent BottomSheetDialog
 
 设想一个使用场景，某个界面必定包含BottomSheetDialog，需要靠它实现其他功能的选择，举个例子，知乎的评论就是依靠BottomSheetDialog来实现的（一个东西看起来像鸭子，吃起来也像鸭子，那么它就是鸭子），而且有很明显的特征：在回答界面必定存在这个评论功能，那么我们可以将它视为Persistent固定场景，此时实现BottomSheetDialog的方式是使用BottomSheetBehavior，而不是`new BottomSheetDialog()`，实例代码如下：
 
@@ -257,7 +257,7 @@ public class SecondActivity extends AppCompatActivity {
 至此，简单的通过BottomSheetBehavior实现BottomSheetDialog就结束了，更复杂的效果是添加RecyclerView到BottomSheetDialog
 中，同时增加点击事件监听等等，接下来介绍如何动态使用BottomSheetDialog。
 
-### Modal BottomSheetDialog
+### 2.2 Modal BottomSheetDialog
 
 如果你使用过AlertDialog那么就应该知道了，动态调用就是直接new一个出来，然后show一下就完事了，同理对BottomSheetDialog也成立，
 因此不需要固定的BottomSheetBehavior，而直接new也分为两种方式，一个是`new BottomSheetDialog()`，另一个是`new BottomSheetDialog()`，
@@ -1416,8 +1416,8 @@ public class FourthActivity extends AppCompatActivity {
 
 很明显有几个问题：
 
-1. list上面有一段空白
-2. 除了第一个Fragment中的list可以上下滑动以外，其他Fragment中的list不可滑动，这也就是BottomSheetDialog的bug
+1. list上面有一段空白；
+2. 除了第一个Fragment中的list可以上下滑动以外，其他Fragment中的list不可滑动，这也就是BottomSheetDialog的bug。
 
 ## 4. 解决方法
 
@@ -1512,7 +1512,15 @@ public class FourthActivity extends AppCompatActivity {
 1. 创建当前项目下的另一个包com.google.android.material.bottomsheet不是一个很好的选择，所以不采用；
 2. 新建ViewPagerBottomSheetBehavior类，复制代码，并修改findScrollingChild方法，这样会创建很多额外的文件。
 
-采用方法二，我们需要加入以下几个文件`ViewPagerBottomSheetBehavior.java`、`ViewPagerUtils.java`、`BottomSheetUtils.java`、`design_view_pager_bottom_sheet_dialog.xml`
+采用方法二，我们需要加入以下几个文件：
+
+`ViewPagerBottomSheetBehavior.java`
+
+`ViewPagerUtils.java`
+
+`BottomSheetUtils.java`
+
+`design_view_pager_bottom_sheet_dialog.xml`
 
 ```java
 /**
