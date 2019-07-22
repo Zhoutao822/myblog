@@ -505,17 +505,21 @@ public void onResponse(@NotNull Call call, @NotNull Response response) throws IO
     this.builderHierarchyFactories = builderHierarchyFactories;
 
     List<TypeAdapterFactory> factories = new ArrayList<TypeAdapterFactory>();
-
+    // 内置的TypeAdapter，比如ObjectTypeAdapter用于处理Object类型数据
     // built-in type adapters that cannot be overridden
     factories.add(TypeAdapters.JSON_ELEMENT_FACTORY);
     factories.add(ObjectTypeAdapter.FACTORY);
 
+    // excluder用于控制属性的是否支持序列化与反序列化，比如用@Expose修饰的属性，
+    // 优先级必须在所有TypeAdapter之前
     // the excluder must precede all adapters that handle user-defined types
     factories.add(excluder);
 
+    // 开发人员自定义的TypeAdapter，优先级相对较高
     // users' type adapters
     factories.addAll(factoriesToBeAdded);
 
+    // 基础类型数据，包括String、Integer等包装类型
     // type adapters for basic platform types
     factories.add(TypeAdapters.STRING_FACTORY);
     factories.add(TypeAdapters.INTEGER_FACTORY);
@@ -553,13 +557,15 @@ public void onResponse(@NotNull Call call, @NotNull Response response) throws IO
     factories.add(TypeAdapters.TIMESTAMP_FACTORY);
     factories.add(ArrayTypeAdapter.FACTORY);
     factories.add(TypeAdapters.CLASS_FACTORY);
-
+    
+    // 集合类型优先级较低，包括Map、Collection等
     // type adapters for composite and user-defined types
     factories.add(new CollectionTypeAdapterFactory(constructorConstructor));
     factories.add(new MapTypeAdapterFactory(constructorConstructor, complexMapKeySerialization));
     this.jsonAdapterFactory = new JsonAdapterAnnotationTypeAdapterFactory(constructorConstructor);
     factories.add(jsonAdapterFactory);
     factories.add(TypeAdapters.ENUM_FACTORY);
+    // 反射类型优先级最低，而这个反射类型就是我们自定义WeatherEntity的TypeAdapter
     factories.add(new ReflectiveTypeAdapterFactory(
         constructorConstructor, fieldNamingStrategy, excluder, jsonAdapterFactory));
 
@@ -660,6 +666,300 @@ JsonReader并不是继承自Reader，JsonReader需要配合TypeAdapter使用
     return jsonReader;
   }
 ```
+
+getAdapter方法如何获取到TypeAdapter
+
+```java
+  /**
+   * Returns the type adapter for {@code} type.
+   *
+   * @throws IllegalArgumentException if this GSON cannot serialize and
+   *     deserialize {@code type}.
+   */
+  @SuppressWarnings("unchecked")
+  public <T> TypeAdapter<T> getAdapter(TypeToken<T> type) {
+    // 初始情况下typeTokenCache为空
+    TypeAdapter<?> cached = typeTokenCache.get(type == null ? NULL_KEY_SURROGATE : type);
+    if (cached != null) {
+      return (TypeAdapter<T>) cached;
+    }
+    // calls初始也为空
+    Map<TypeToken<?>, FutureTypeAdapter<?>> threadCalls = calls.get();
+    boolean requiresThreadLocalCleanup = false;
+    if (threadCalls == null) {
+      threadCalls = new HashMap<TypeToken<?>, FutureTypeAdapter<?>>();
+      calls.set(threadCalls);
+      requiresThreadLocalCleanup = true;
+    }
+    // ThreadLocal在这里是防止老是执行for (TypeAdapterFactory factory : factories) 递归查找，
+    // 如果不用ThreadLocal干预的话，就会导致堆栈溢出
+    // the key and value type parameters always agree
+    FutureTypeAdapter<T> ongoingCall = (FutureTypeAdapter<T>) threadCalls.get(type);
+    if (ongoingCall != null) {
+      return ongoingCall;
+    }
+
+    try {
+      FutureTypeAdapter<T> call = new FutureTypeAdapter<T>();
+      threadCalls.put(type, call);
+      // TypeAdapter是从Gson初始化的factories中按照顺序遍历得到的，
+      // 所以接下来需要看这里使用的是哪个TypeAdapterFactory
+      for (TypeAdapterFactory factory : factories) {
+        TypeAdapter<T> candidate = factory.create(this, type);
+        if (candidate != null) {
+          call.setDelegate(candidate);
+          typeTokenCache.put(type, candidate);
+          return candidate;
+        }
+      }
+      throw new IllegalArgumentException("GSON (" + GsonBuildConfig.VERSION + ") cannot handle " + type);
+    } finally {
+      threadCalls.remove(type);
+
+      if (requiresThreadLocalCleanup) {
+        calls.remove();
+      }
+    }
+  }
+```
+
+ReflectiveTypeAdapterFactory的create方法得到我们处理WeatherEntity的TypeAdapter
+
+```java
+// ReflectiveTypeAdapterFactory.java create方法返回的是Adapter
+  @Override public <T> TypeAdapter<T> create(Gson gson, final TypeToken<T> type) {
+    Class<? super T> raw = type.getRawType();
+
+    if (!Object.class.isAssignableFrom(raw)) {
+      return null; // it's a primitive!
+    }
+
+    ObjectConstructor<T> constructor = constructorConstructor.get(type);
+    return new Adapter<T>(constructor, getBoundFields(gson, type, raw));
+  }
+
+  // Adapter的read方法就是返回WeatherEntity的位置
+    Adapter(ObjectConstructor<T> constructor, Map<String, BoundField> boundFields) {
+      this.constructor = constructor;
+      this.boundFields = boundFields;
+    }
+    // read实际上是被递归调用的
+    @Override public T read(JsonReader in) throws IOException {
+      // JsonReader中保存了我们需要解析的字符串数据，所以也封装了一些读取的函数，
+      // 通过peek判断JsonReader是否已经读到结尾了来结束解析的过程
+      if (in.peek() == JsonToken.NULL) {
+        in.nextNull();
+        return null;
+      }
+      // 两个类ObjectConstructor和BoundField，看名字就知道了ObjectConstructor
+      // 用于构造实例，BoundField用于指定属性
+      T instance = constructor.construct();
+    
+      try {
+        // JsonReader有几个方法，比如beginObject和beginArray，表明要开始解析
+        // JsonReader的数据了，beginObject表明需要解析为对象，beginArray表明需要解析为
+        // 数组
+        in.beginObject();
+        // hasNext表明数据是否到达结尾
+        while (in.hasNext()) {
+          // nextName可以获取json数据中的key
+          String name = in.nextName();
+          // 通过将name转为BoundField，为后续生成属性做铺垫
+          BoundField field = boundFields.get(name);
+          // 如果不能生成此属性或者不允许反序列化，则跳过此key对应的value数据
+          if (field == null || !field.deserialized) {
+            in.skipValue();
+          } else {
+            // 然后需要对属性进行赋值，因此需要看BoundField的read方法做了些什么
+            field.read(in, instance);
+          }
+        }
+      } catch (IllegalStateException e) {
+        throw new JsonSyntaxException(e);
+      } catch (IllegalAccessException e) {
+        throw new AssertionError(e);
+      }
+      in.endObject();
+      // 最后返回我们的实例
+      return instance;
+    }
+
+// BoundField来源于getBoundFields方法
+  private Map<String, BoundField> getBoundFields(Gson context, TypeToken<?> type, Class<?> raw) {
+    Map<String, BoundField> result = new LinkedHashMap<String, BoundField>();
+    if (raw.isInterface()) {
+      return result;
+    }
+
+    Type declaredType = type.getType();
+    while (raw != Object.class) {
+      // 首先获得我们自定义WeatherEntity的属性
+      Field[] fields = raw.getDeclaredFields();
+      for (Field field : fields) {
+        // 对于每一个属性我们通过Excluder判断是否有@Expose或者其他注解修饰
+        // 根据注解的要求保存这个属性是否支持序列化serialize和反序列化deserialize
+        boolean serialize = excludeField(field, true);
+        boolean deserialize = excludeField(field, false);
+        if (!serialize && !deserialize) {
+          continue;
+        }
+        accessor.makeAccessible(field);
+        Type fieldType = $Gson$Types.resolve(type.getType(), raw, field.getGenericType());
+        // 因为Gson支持序列化时指定key的名称，所以会有一些替代名称，替代名称可以有多个，因此需要
+        // 通过getFieldNames获取属性的所有序列化时的名称列表（第一个为属性名，其他可以是设置的替代名称）
+        List<String> fieldNames = getFieldNames(field);
+        BoundField previous = null;
+        for (int i = 0, size = fieldNames.size(); i < size; ++i) {
+          String name = fieldNames.get(i);
+          if (i != 0) serialize = false; // only serialize the default name
+          // result的value boundField是通过createBoundField得到的，且只有第一个名称允许序列化
+          BoundField boundField = createBoundField(context, field, name,
+              TypeToken.get(fieldType), serialize, deserialize);
+          BoundField replaced = result.put(name, boundField);
+          if (previous == null) previous = replaced;
+        }
+        if (previous != null) {
+          throw new IllegalArgumentException(declaredType
+              + " declares multiple JSON fields named " + previous.name);
+        }
+      }
+      type = TypeToken.get($Gson$Types.resolve(type.getType(), raw, raw.getGenericSuperclass()));
+      raw = type.getRawType();
+    }
+    return result;
+  }
+
+// createBoundField返回我们需要的BoundField
+  private ReflectiveTypeAdapterFactory.BoundField createBoundField(
+      final Gson context, final Field field, final String name,
+      final TypeToken<?> fieldType, boolean serialize, boolean deserialize) {
+    final boolean isPrimitive = Primitives.isPrimitive(fieldType.getRawType());
+    // special casing primitives here saves ~5% on Android...
+    JsonAdapter annotation = field.getAnnotation(JsonAdapter.class);
+    TypeAdapter<?> mapped = null;
+    if (annotation != null) {
+      mapped = jsonAdapterFactory.getTypeAdapter(
+          constructorConstructor, context, fieldType, annotation);
+    }
+    // mapped也是通过getAdapter获取的，但是fieldType已经改变了，变成了我们定义的实体类的下一级
+    final boolean jsonAdapterPresent = mapped != null;
+    if (mapped == null) mapped = context.getAdapter(fieldType);
+
+    final TypeAdapter<?> typeAdapter = mapped;
+    return new ReflectiveTypeAdapterFactory.BoundField(name, serialize, deserialize) {
+      @SuppressWarnings({"unchecked", "rawtypes"}) // the type adapter and field type always agree
+      @Override void write(JsonWriter writer, Object value)
+          throws IOException, IllegalAccessException {
+        Object fieldValue = field.get(value);
+        TypeAdapter t = jsonAdapterPresent ? typeAdapter
+            : new TypeAdapterRuntimeTypeWrapper(context, typeAdapter, fieldType.getType());
+        t.write(writer, fieldValue);
+      }
+      // 在调用read方法时就产生了递归
+      @Override void read(JsonReader reader, Object value)
+          throws IOException, IllegalAccessException {
+        // 由于属性的类型不同，此处的typeAdapter变为从factories遍历获取，
+        // 如果我们这里的reader是String，那么typeAdapter为TypeAdapters.STRING_FACTORY
+        // 然后按照TypeAdapters.STRING_FACTORY的逻辑读取数据
+        Object fieldValue = typeAdapter.read(reader);
+        if (fieldValue != null || !isPrimitive) {
+          // set方法把值fieldValue赋给对象value
+          field.set(value, fieldValue);
+        }
+      }
+      @Override public boolean writeField(Object value) throws IOException, IllegalAccessException {
+        if (!serialized) return false;
+        Object fieldValue = field.get(value);
+        return fieldValue != value; // avoid recursion for example for Throwable.cause
+      }
+    };
+  }
+```
+
+我们目前知道了属性是通过getDeclaredFields拿到的，然后通过递归的方式调用typeAdapter的read方法，然后将从JsonReader中获取到的值赋给属性，关键是属性实例是如何得到的`T instance = constructor.construct();`，默认情况下是ConstructorConstructor，通过ConstructorConstructor构造某个属性的实例
+
+```java
+// ConstructorConstructor.java 默认instanceCreators为空
+  public <T> ObjectConstructor<T> get(TypeToken<T> typeToken) {
+    final Type type = typeToken.getType();
+    final Class<? super T> rawType = typeToken.getRawType();
+
+    // first try an instance creator
+
+    @SuppressWarnings("unchecked") // types must agree
+    final InstanceCreator<T> typeCreator = (InstanceCreator<T>) instanceCreators.get(type);
+    if (typeCreator != null) {
+      return new ObjectConstructor<T>() {
+        @Override public T construct() {
+          return typeCreator.createInstance(type);
+        }
+      };
+    }
+
+    // Next try raw type match for instance creators
+    @SuppressWarnings("unchecked") // types must agree
+    final InstanceCreator<T> rawTypeCreator =
+        (InstanceCreator<T>) instanceCreators.get(rawType);
+    if (rawTypeCreator != null) {
+      return new ObjectConstructor<T>() {
+        @Override public T construct() {
+          return rawTypeCreator.createInstance(type);
+        }
+      };
+    }
+
+    // 我们构造的实例一般是通过newDefaultConstructor得到的
+    ObjectConstructor<T> defaultConstructor = newDefaultConstructor(rawType);
+    if (defaultConstructor != null) {
+      return defaultConstructor;
+    }
+
+    // newDefaultImplementationConstructor用于构造Map和List以及它们的父类接口的实例
+    ObjectConstructor<T> defaultImplementation = newDefaultImplementationConstructor(type, rawType);
+    if (defaultImplementation != null) {
+      return defaultImplementation;
+    }
+
+    // finally try unsafe
+    return newUnsafeAllocator(type, rawType);
+  }
+
+  private <T> ObjectConstructor<T> newDefaultConstructor(Class<? super T> rawType) {
+    try {
+      // getDeclaredConstructor通过反射得到目标类的构造函数
+      final Constructor<? super T> constructor = rawType.getDeclaredConstructor();
+      if (!constructor.isAccessible()) {
+        accessor.makeAccessible(constructor);
+      }
+      return new ObjectConstructor<T>() {
+        @SuppressWarnings("unchecked") // T is the same raw type as is requested
+        @Override public T construct() {
+          try {
+            Object[] args = null;
+            // 返回初始参数都为null的实例
+            return (T) constructor.newInstance(args);
+          } catch (InstantiationException e) {
+            // TODO: JsonParseException ?
+            throw new RuntimeException("Failed to invoke " + constructor + " with no args", e);
+          } catch (InvocationTargetException e) {
+            // TODO: don't wrap if cause is unchecked!
+            // TODO: JsonParseException ?
+            throw new RuntimeException("Failed to invoke " + constructor + " with no args",
+                e.getTargetException());
+          } catch (IllegalAccessException e) {
+            throw new AssertionError(e);
+          }
+        }
+      };
+    } catch (NoSuchMethodException e) {
+      return null;
+    }
+  }
+```
+
+读取json字符串的工作是由JsonReader完成的
+
+
 
 
 
