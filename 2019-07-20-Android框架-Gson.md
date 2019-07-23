@@ -957,7 +957,514 @@ ReflectiveTypeAdapterFactory的create方法得到我们处理WeatherEntity的Typ
   }
 ```
 
-读取json字符串的工作是由JsonReader完成的
+读取json字符串的工作是由JsonReader完成的，以解析下面此json字符串为例（删减版），服务器传过来的数据可能没有换行
+
+```json
+{
+    "HeWeather6": [
+        {
+            "basic": {
+                "cid": "CN101010100",
+                "location": "北京"
+            },
+            "update": {
+                "loc": "2019-07-18 16:45"
+            },
+            "status": "ok"
+        }]
+}    
+```
+
+根据上文代码分析我们知道解析数据的起点是ReflectiveTypeAdapterFactory中Adapter的read方法
+
+```java
+    @Override public T read(JsonReader in) throws IOException {
+      if (in.peek() == JsonToken.NULL) {
+        in.nextNull();
+        return null;
+      }
+
+      T instance = constructor.construct();
+
+      try {
+        // 从in.beginObject开始对json数据进行解析
+        in.beginObject();
+        while (in.hasNext()) {
+          String name = in.nextName();
+          // 14. 得到解析的key后构造属性
+          BoundField field = boundFields.get(name);
+          if (field == null || !field.deserialized) {
+            in.skipValue();
+          } else {
+            // 15. 并且递归解析后面的数据，深度优先，这里会调用CollectionTypeAdapterFactory的Adapter的read方法
+            // CollectionTypeAdapterFactory用于处理集合类数据，这里会调用peek方法
+            field.read(in, instance);
+          }
+        }
+      } catch (IllegalStateException e) {
+        throw new JsonSyntaxException(e);
+      } catch (IllegalAccessException e) {
+        throw new AssertionError(e);
+      }
+      in.endObject();
+      return instance;
+    }
+```
+
+```java
+// JsonReader.java peeked是标志位，初始为PEEKED_NONE，表明还没有开始任何解析过程
+// JsonReader解析数据的过程很有意思，它是依靠peeked标志位来决定如何处理下一个字符，
+// peeked初始值为PEEKED_NONE，表明标志位为空所以需要读取json数据，根据读取的字符设置peeked
+// 的值，然后再根据peeked的值决定下一个字符如何处理
+  /**
+   * Consumes the next token from the JSON stream and asserts that it is the
+   * beginning of a new object.
+   */
+  public void beginObject() throws IOException {
+    int p = peeked;
+    if (p == PEEKED_NONE) {
+      // 初始值peeked为PEEKED_NONE，调用doPeek方法设置peeked的标志
+      p = doPeek();
+    }
+    if (p == PEEKED_BEGIN_OBJECT) {
+      // 4. 由于doPeek将p置为PEEKED_BEGIN_OBJECT，所以需要将JsonScope.EMPTY_OBJECT
+      // 加入stack中，并peeked重置为PEEKED_NONE
+      push(JsonScope.EMPTY_OBJECT);
+      peeked = PEEKED_NONE;
+    } else {
+      throw new IllegalStateException("Expected BEGIN_OBJECT but was " + peek() + locationString());
+    }
+  }
+
+// doPeek是整个解析过程中的核心代码，其他的函数都会调用到doPeek
+  int doPeek() throws IOException {
+    // 除了有peeked标志还有stack数组，stack数组保存解析json数据的进度，stack初始值全为0，
+    // 初始化后将stack[0]置为JsonScope.EMPTY_DOCUMENT，表明还未开始解析
+    // 6. 在hasNext方法中再次执行doPeek，此时peekStack为JsonScope.NONEMPTY_OBJECT
+    int peekStack = stack[stackSize - 1];
+    // 25. stack的top被置为JsonScope.EMPTY_ARRAY，表明期望的数据是Array
+    if (peekStack == JsonScope.EMPTY_ARRAY) {
+      // 继续重置stack top为JsonScope.NONEMPTY_ARRAY
+      stack[stackSize - 1] = JsonScope.NONEMPTY_ARRAY;
+    } else if (peekStack == JsonScope.NONEMPTY_ARRAY) {
+      // Look for a comma before the next element.
+      int c = nextNonWhitespace(true);
+      switch (c) {
+      case ']':
+        return peeked = PEEKED_END_ARRAY;
+      case ';':
+        checkLenient(); // fall-through
+      case ',':
+        break;
+      default:
+        throw syntaxError("Unterminated array");
+      }
+    } else if (peekStack == JsonScope.EMPTY_OBJECT || peekStack == JsonScope.NONEMPTY_OBJECT) {
+      // 7. 又将stack的top置为JsonScope.DANGLING_NAME
+      stack[stackSize - 1] = JsonScope.DANGLING_NAME;
+      // Look for a comma before the next element.
+      if (peekStack == JsonScope.NONEMPTY_OBJECT) {
+        int c = nextNonWhitespace(true);
+        switch (c) {
+        case '}':
+          return peeked = PEEKED_END_OBJECT;
+        case ';':
+          checkLenient(); // fall-through
+        case ',':
+          break;
+        default:
+          throw syntaxError("Unterminated object");
+        }
+      }
+      // 8. 读取下一个字符 "
+      int c = nextNonWhitespace(true);
+      switch (c) {
+      case '"':
+      // 9. 显然将peeked置为PEEKED_DOUBLE_QUOTED_NAME
+        return peeked = PEEKED_DOUBLE_QUOTED_NAME;
+      case '\'':
+        checkLenient();
+        return peeked = PEEKED_SINGLE_QUOTED_NAME;
+      case '}':
+        if (peekStack != JsonScope.NONEMPTY_OBJECT) {
+          return peeked = PEEKED_END_OBJECT;
+        } else {
+          throw syntaxError("Expected name");
+        }
+      default:
+        checkLenient();
+        pos--; // Don't consume the first character in an unquoted string.
+        if (isLiteral((char) c)) {
+          return peeked = PEEKED_UNQUOTED_NAME;
+        } else {
+          throw syntaxError("Expected name");
+        }
+      }
+    } else if (peekStack == JsonScope.DANGLING_NAME) {
+      // 17. 之前stack的top被置为JsonScope.DANGLING_NAME
+      // 然后stack的top置为JsonScope.NONEMPTY_OBJECT，表明object对象还没有读取完成
+      stack[stackSize - 1] = JsonScope.NONEMPTY_OBJECT;
+      // Look for a colon before the value.
+      // 下一个字符是 :
+      int c = nextNonWhitespace(true);
+      switch (c) {
+      case ':':
+        break;
+      case '=':
+        checkLenient();
+        if ((pos < limit || fillBuffer(1)) && buffer[pos] == '>') {
+          pos++;
+        }
+        break;
+      default:
+        throw syntaxError("Expected ':'");
+      }
+    } else if (peekStack == JsonScope.EMPTY_DOCUMENT) {
+      // 1. peekStack初始为JsonScope.EMPTY_DOCUMENT
+      if (lenient) {
+        // lenient在调用read方法之前被置为true，结束后被置为false
+        consumeNonExecutePrefix();
+      }
+      // stack[0]被置为JsonScope.NONEMPTY_DOCUMENT
+      stack[stackSize - 1] = JsonScope.NONEMPTY_DOCUMENT;
+    } else if (peekStack == JsonScope.NONEMPTY_DOCUMENT) {
+      int c = nextNonWhitespace(false);
+      if (c == -1) {
+        return peeked = PEEKED_EOF;
+      } else {
+        checkLenient();
+        pos--;
+      }
+    } else if (peekStack == JsonScope.CLOSED) {
+      throw new IllegalStateException("JsonReader is closed");
+    }
+    // 2. c是第一个字符 {
+    // 18. c是 [
+    // 26. c是 {
+    int c = nextNonWhitespace(true);
+    switch (c) {
+    case ']':
+      if (peekStack == JsonScope.EMPTY_ARRAY) {
+        return peeked = PEEKED_END_ARRAY;
+      }
+      // fall-through to handle ",]"
+    case ';':
+    case ',':
+      // In lenient mode, a 0-length literal in an array means 'null'.
+      if (peekStack == JsonScope.EMPTY_ARRAY || peekStack == JsonScope.NONEMPTY_ARRAY) {
+        checkLenient();
+        pos--;
+        return peeked = PEEKED_NULL;
+      } else {
+        throw syntaxError("Unexpected value");
+      }
+    case '\'':
+      checkLenient();
+      return peeked = PEEKED_SINGLE_QUOTED;
+    case '"':
+      return peeked = PEEKED_DOUBLE_QUOTED;
+    case '[':
+    // 19. 将peeked置为PEEKED_BEGIN_ARRAY
+    // 表明开始解析Array类型数据
+      return peeked = PEEKED_BEGIN_ARRAY;
+    case '{':
+    // 3. peeked被置为PEEKED_BEGIN_OBJECT
+    // 27. peeked被置为PEEKED_BEGIN_OBJECT
+      return peeked = PEEKED_BEGIN_OBJECT;
+    default:
+      pos--; // Don't consume the first character in a literal value.
+    }
+
+    int result = peekKeyword();
+    if (result != PEEKED_NONE) {
+      return result;
+    }
+
+    result = peekNumber();
+    if (result != PEEKED_NONE) {
+      return result;
+    }
+
+    if (!isLiteral(buffer[pos])) {
+      throw syntaxError("Expected value");
+    }
+
+    checkLenient();
+    return peeked = PEEKED_UNQUOTED;
+  }
+
+// NON_EXECUTE_PREFIX包括")]}'\n"，即如果json字符串第一个字符在NON_EXECUTE_PREFIX中
+// 说明这个字符出了错误，buffer是1024长度的数组用于缓存json数据，pos表示我们读取数据的位置，
+// consumeNonExecutePrefix用于
+  /**
+   * Consumes the non-execute prefix if it exists.
+   */
+  private void consumeNonExecutePrefix() throws IOException {
+    // fast forward through the leading whitespace
+    nextNonWhitespace(true);
+    pos--;
+
+    if (pos + NON_EXECUTE_PREFIX.length > limit && !fillBuffer(NON_EXECUTE_PREFIX.length)) {
+      return;
+    }
+
+    for (int i = 0; i < NON_EXECUTE_PREFIX.length; i++) {
+      if (buffer[pos + i] != NON_EXECUTE_PREFIX[i]) {
+        return; // not a security token!
+      }
+    }
+
+    // we consumed a security token!
+    pos += NON_EXECUTE_PREFIX.length;
+  }
+
+// 5. 在while循环里判断hasNext，显然peeked此时为PEEKED_NONE，所以执行doPeek
+  /**
+   * Returns true if the current array or object has another element.
+   */
+  public boolean hasNext() throws IOException {
+    int p = peeked;
+    if (p == PEEKED_NONE) {
+      p = doPeek();
+    }
+    // 10. p为PEEKED_DOUBLE_QUOTED_NAME，显然返回true
+    return p != PEEKED_END_OBJECT && p != PEEKED_END_ARRAY;
+  }  
+
+// 11. 然后通过in.nextName()读取json数据
+  /**
+   * Returns the next token, a {@link com.google.gson.stream.JsonToken#NAME property name}, and
+   * consumes it.
+   *
+   * @throws java.io.IOException if the next token in the stream is not a property
+   *     name.
+   */
+  public String nextName() throws IOException {
+    // 12. 此时peeked为PEEKED_DOUBLE_QUOTED_NAME
+    int p = peeked;
+    if (p == PEEKED_NONE) {
+      p = doPeek();
+    }
+    String result;
+    if (p == PEEKED_UNQUOTED_NAME) {
+      result = nextUnquotedValue();
+    } else if (p == PEEKED_SINGLE_QUOTED_NAME) {
+      result = nextQuotedValue('\'');
+    } else if (p == PEEKED_DOUBLE_QUOTED_NAME) {
+      // 13. 调用nextQuotedValue，nextQuotedValue方法读取buffer中不为 " 的字符串，
+      // 简而言之就是在已知我们已经读取到双引号的情况下，将两个双引号之间的数据获取到，
+      // 所以这里的result为HeWeather6
+      result = nextQuotedValue('"');
+    } else {
+      throw new IllegalStateException("Expected a name but was " + peek() + locationString());
+    }
+    // 最后还是需要重置peeked为PEEKED_NONE
+    peeked = PEEKED_NONE;
+    // 将result保存到pathNames中
+    pathNames[stackSize - 1] = result;
+    return result;
+  }
+
+// 16. peek继续调用doPeek
+  /**
+   * Returns the type of the next token without consuming it.
+   */
+  public JsonToken peek() throws IOException {
+    int p = peeked;
+    if (p == PEEKED_NONE) {
+      p = doPeek();
+    }
+
+    switch (p) {
+    case PEEKED_BEGIN_OBJECT:
+      return JsonToken.BEGIN_OBJECT;
+    case PEEKED_END_OBJECT:
+      return JsonToken.END_OBJECT;
+    case PEEKED_BEGIN_ARRAY:
+    // 20. 返回JsonToken.BEGIN_ARRAY
+      return JsonToken.BEGIN_ARRAY;
+    case PEEKED_END_ARRAY:
+      return JsonToken.END_ARRAY;
+    case PEEKED_SINGLE_QUOTED_NAME:
+    case PEEKED_DOUBLE_QUOTED_NAME:
+    case PEEKED_UNQUOTED_NAME:
+      return JsonToken.NAME;
+    case PEEKED_TRUE:
+    case PEEKED_FALSE:
+      return JsonToken.BOOLEAN;
+    case PEEKED_NULL:
+      return JsonToken.NULL;
+    case PEEKED_SINGLE_QUOTED:
+    case PEEKED_DOUBLE_QUOTED:
+    case PEEKED_UNQUOTED:
+    case PEEKED_BUFFERED:
+      return JsonToken.STRING;
+    case PEEKED_LONG:
+    case PEEKED_NUMBER:
+      return JsonToken.NUMBER;
+    case PEEKED_EOF:
+      return JsonToken.END_DOCUMENT;
+    default:
+      throw new AssertionError();
+    }
+  }
+
+// 23. beginArray用于解析Array类型数据
+  /**
+   * Consumes the next token from the JSON stream and asserts that it is the
+   * beginning of a new array.
+   */
+  public void beginArray() throws IOException {
+    int p = peeked;
+    if (p == PEEKED_NONE) {
+      p = doPeek();
+    }
+    // 由于peeked被置为PEEKED_BEGIN_ARRAY
+    // stack的top被置为JsonScope.EMPTY_ARRAY
+    if (p == PEEKED_BEGIN_ARRAY) {
+      push(JsonScope.EMPTY_ARRAY);
+      pathIndices[stackSize - 1] = 0;
+      peeked = PEEKED_NONE;
+    } else {
+      throw new IllegalStateException("Expected BEGIN_ARRAY but was " + peek() + locationString());
+    }
+  }
+```
+
+```java
+    @Override public Collection<E> read(JsonReader in) throws IOException {
+      // 21. in.peek()返回JsonToken.BEGIN_ARRAY
+      if (in.peek() == JsonToken.NULL) {
+        in.nextNull();
+        return null;
+      }
+
+      Collection<E> collection = constructor.construct();
+      // 22.所以调用beginArray解析数据
+      in.beginArray();
+      // 24. 继续判断hasNext，但是还是通过doPeek解析
+      while (in.hasNext()) {
+        // 28. hasNext返回true，elementTypeAdapter是通过gson.getAdapter获取的，
+        // 本质上还是ReflectiveTypeAdapterFactory的Adapter的read方法，那么下一个属性的实例化
+        // 又进入了递归的模式，与此同时我们对于Array类型的属性是通过构造collection对象来加入下一级的
+        // 对象
+        E instance = elementTypeAdapter.read(in);
+        collection.add(instance);
+      }
+      in.endArray();
+      return collection;
+    }
+```
+
+JsonReader可以完成的内容非常多，基本可以解析大多数的数据，而你只需要调用其中的beginArray、endArray、beginObject、endObject、hasNext等方法就可以得到json字符串中正确的数据部分，而且不需要考虑括号、引号、分号等等，在这些方法中就已经帮你跳过了，所以你也可以自定义json解析规则，实例代码在JsonReader的注释中给出了
+
+```json
+[
+  {
+    "id": 912345678901,
+    "text": "How do I read a JSON stream in Java?",
+    "geo": null,
+    "user": {
+      "name": "json_newb",
+      "followers_count": 41
+     }
+  },
+  {
+    "id": 912345678902,
+    "text": "@json_newb just use JsonReader!",
+    "geo": [50.454722, -104.606667],
+    "user": {
+      "name": "jesse",
+      "followers_count": 2
+    }
+  }
+]
+```
+
+```java
+public List<Message> readJsonStream(InputStream in) throws IOException {
+  JsonReader reader = new JsonReader(new InputStreamReader(in, "UTF-8"));
+  try {
+    return readMessagesArray(reader);
+  } finally {
+    reader.close();
+  }
+}
+
+public List<Message> readMessagesArray(JsonReader reader) throws IOException {
+  List<Message> messages = new ArrayList<Message>();
+
+  reader.beginArray();
+  while (reader.hasNext()) {
+    messages.add(readMessage(reader));
+  }
+  reader.endArray();
+  return messages;
+}
+
+public Message readMessage(JsonReader reader) throws IOException {
+  long id = -1;
+  String text = null;
+  User user = null;
+  List<Double> geo = null;
+
+  reader.beginObject();
+  while (reader.hasNext()) {
+    String name = reader.nextName();
+    if (name.equals("id")) {
+      id = reader.nextLong();
+    } else if (name.equals("text")) {
+      text = reader.nextString();
+    } else if (name.equals("geo") && reader.peek() != JsonToken.NULL) {
+      geo = readDoublesArray(reader);
+    } else if (name.equals("user")) {
+      user = readUser(reader);
+    } else {
+      reader.skipValue();
+    }
+  }
+  reader.endObject();
+  return new Message(id, text, user, geo);
+}
+
+public List<Double> readDoublesArray(JsonReader reader) throws IOException {
+  List<Double> doubles = new ArrayList<Double>();
+
+  reader.beginArray();
+  while (reader.hasNext()) {
+    doubles.add(reader.nextDouble());
+  }
+  reader.endArray();
+  return doubles;
+}
+
+public User readUser(JsonReader reader) throws IOException {
+  String username = null;
+  int followersCount = -1;
+
+  reader.beginObject();
+  while (reader.hasNext()) {
+    String name = reader.nextName();
+    if (name.equals("name")) {
+      username = reader.nextString();
+    } else if (name.equals("followers_count")) {
+      followersCount = reader.nextInt();
+    } else {
+      reader.skipValue();
+    }
+  }
+  reader.endObject();
+  return new User(username, followersCount);
+}
+```
+
+以上就是Gson解析json数据并实例化的过程，反之toJson将实例转为json数据也差不多。解析json数据是一个深度优先遍历的过程，同时根据各种括号、分号、引号判断数据类型以及数据的值，Gson在解析的过程中有一些非常亮眼的设计思路：
+
+1. TypeAdapterFactory工厂类，用于提供TypeAdapter，TypeAdapter用于将json数据转为实例，由于Java中包含大量的基础类型和自定义类型，所以Gson提供了对应的基础类型的TypeAdapterFactory工厂，这些工厂提供的Adapter可以按照设计好的方式调用JsonReader的各种方法读取数据并转为实例；同时对于自定义类型，提供了ReflectiveTypeAdapterFactory，通过反射的方式构造实例，同时根据不同的属性的类型，又可以使用TypeToken来表示便于后续查找合适的TypeAdapter；
+2. JsonReader的强大功能，为了获取到json数据中的有效数据，比如属性名称、属性的值以及属性的类型，JsonReader加入了两个非常关键的参数peeked和stack，peeked用于标志当前的解析步骤是否完成，比如在调用beginObject后，peeked经历PEEKED_NONE -> PEEKED_BEGIN_OBJECT -> PEEKED_NONE的过程，通过doPeek完成这些步骤的转换，只要最终为PEEKED_NONE，说明前面都没有发生错误；其次是stack，stack保存了当前进行的流程，比如JsonScope.EMPTY_ARRAY、JsonScope.NONEMPTY_ARRAY、JsonScope.NONEMPTY_OBJECT等等，通过doPeek判断字符串，我们就知道了当前json数据可能是属于什么类型，从而将符号进行划分再判断，减少了需要判断的条件。
+
+
+
 
 
 
