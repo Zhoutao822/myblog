@@ -1301,6 +1301,38 @@ EventBus源码解析暂时留个坑。
 
 
 
+```gradle
+implementation "io.reactivex.rxjava2:rxjava:2.2.8" // 必要rxjava2依赖
+implementation "io.reactivex.rxjava2:rxandroid:2.1.0" // 必要rxandrroid依赖，切线程时需要用到
+```
+
+还是以请求和风天气数据为例
+
+```java
+Retrofit retrofit = new Retrofit.Builder()
+        .baseUrl(URL)
+        .addConverterFactory(GsonConverterFactory.create())
+        .addCallAdapterFactory(RxJava2CallAdapterFactory.create())
+        .build();
+
+Api api = retrofit.create(Api.class);
+// 这里的getNowWeather方法在Api.java中返回的是Observable
+api.getNowWeather("beijing", KEY)
+        .subscribeOn(Schedulers.io()) // subscribeOn参数为io线程，表明getNowWeather请求数据执行在io线程
+        .observeOn(AndroidSchedulers.mainThread()) // observeOn参数为主线程，表明请求结束传递的数据在主线程处理
+        .subscribe(new Consumer<WeatherEntity>() { // subscribe定义上面observeOn进行的方法，RxJava2中以Consumer代理处理，一般来说有两个Consumer，一个用于处理请求成功的数据，另一个处理异常
+            @Override
+            public void accept(WeatherEntity weatherEntity) throws Exception {
+                textView.setText(weatherEntity.toString());
+            }
+        }, new Consumer<Throwable>() {
+            @Override
+            public void accept(Throwable throwable) throws Exception {
+                Log.i("aaaa", throwable.getMessage());
+            }
+        });
+```
+
 
 
 
