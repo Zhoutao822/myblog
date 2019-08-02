@@ -20,6 +20,7 @@ tags:
 > [Android 多线程：手把手教你使用AsyncTask](https://www.jianshu.com/p/ee1342fcf5e7)
 > [EventBus使用详解](https://juejin.im/post/5a6c36fff265da3e2f012f82)
 > [Rxjava这一篇就够了，墙裂推荐](https://juejin.im/post/5a224cc76fb9a04527256683)
+> [精彩的RxJava源码剖析](http://www.10tiao.com/html/227/201802/2650242399/1.html)
 
 Android中很多地方都需要跨线程通信，这是由于Android主线程不允许进行复杂的网络请求或者其他非常耗时的操作，否则会导致ANR，主线程只能进行UI操作，比如修改某个控件的text、设置某个控件不可见等等，因此网络请求等操作需要在其他线程中完成，当数据在其他线程中获取完毕时，通过跨线程通信将数据传到主线程中，主线程就可以直接根据数据进行UI操作。常见的跨线程通信的方式有Handler、AsyncTask、EventBus以及RxJava等，前两个是Android自带，后两者是封装好的第三方库。
 
@@ -1299,14 +1300,18 @@ EventBus源码解析暂时留个坑。
 
 ## 4. RxJava
 
+`RxJava – Reactive Extensions for the JVM – a library for composing asynchronous and event-based programs using observable sequences for the Java VM.`
 
+RxJava也是一个可以用于处理线程间通信的工具，但是功能非常强大（不仅限于线程间通信），不仅可以用于Java Web项目也可以在Android项目中使用，RxJava的使用方式与上述各种工具或者框架不太一样，它是通过流式调用的形式使用的。目前有三个版本分别是Version 1.x、Version 2.x以及最新的Version 3.x，新版本加入新的特性比如背压、Java 8等等，这里仅演示RxJava2
 
 ```gradle
 implementation "io.reactivex.rxjava2:rxjava:2.2.8" // 必要rxjava2依赖
-implementation "io.reactivex.rxjava2:rxandroid:2.1.0" // 必要rxandrroid依赖，切线程时需要用到
+implementation "io.reactivex.rxjava2:rxandroid:2.1.0" // 必要rxandrroid依赖，切线程时需要用到AndroidSchedulers.mainThread()
 ```
 
-还是以请求和风天气数据为例
+### 4.1 RxJava结合Retrofit
+
+还是以请求和风天气数据为例，这是Retrofit与RxJava的结合使用，RxJava使用的是观察者模式，这里就不详细解释
 
 ```java
 Retrofit retrofit = new Retrofit.Builder()
@@ -1333,10 +1338,293 @@ api.getNowWeather("beijing", KEY)
         });
 ```
 
+### 4.2 RxJava源码分析
 
+虽然上面的代码只演示了RxJava的线程切换功能，但是实际上RxJava的功能非常强大，在处理大量数据的情况下能够更加简洁有效的代码完成，同时兼具数据变换的功能，这里三言两语很难表述清除，需要实战演练就能够明白，与此同时，基于RxJava我们也可以自定义更多的工具函数，以RxJava流式调用的方式来使用。
 
+首先我们需要知道`retrofit.create(Api.class)`创建了什么，这个在Retrofit框架分析中已经做过了，在这种情况下是通过RxJava2CallAdapterFactory的RxJava2CallAdapter调用adapt方法返回的Observable
 
+```java
+// RxJava2CallAdapter.java
+  @Override public Object adapt(Call<R> call) {
+    Observable<Response<R>> responseObservable = isAsync
+        ? new CallEnqueueObservable<>(call)
+        : new CallExecuteObservable<>(call);
 
+    Observable<?> observable;
+    if (isResult) {
+      observable = new ResultObservable<>(responseObservable);
+    } else if (isBody) {
+      // 根据参数，返回的是BodyObservable
+      observable = new BodyObservable<>(responseObservable);
+    } else {
+      observable = responseObservable;
+    }
+
+    if (scheduler != null) {
+      observable = observable.subscribeOn(scheduler);
+    }
+
+    if (isFlowable) {
+      return observable.toFlowable(BackpressureStrategy.LATEST);
+    }
+    if (isSingle) {
+      return observable.singleOrError();
+    }
+    if (isMaybe) {
+      return observable.singleElement();
+    }
+    if (isCompletable) {
+      return observable.ignoreElements();
+    }
+    return RxJavaPlugins.onAssembly(observable);
+  }
+```
+
+而BodyObservable继承自Observable，并且有一个内部类BodyObserver
+
+```java
+// BodyObservable.java
+final class BodyObservable<T> extends Observable<T> {
+  private final Observable<Response<T>> upstream;
+
+  BodyObservable(Observable<Response<T>> upstream) {
+    this.upstream = upstream;
+  }
+// subscribeActual方法会在Observable调用subscribe方法时被调用
+  @Override protected void subscribeActual(Observer<? super T> observer) {
+    upstream.subscribe(new BodyObserver<T>(observer));
+  }
+
+  private static class BodyObserver<R> implements Observer<Response<R>> {
+    private final Observer<? super R> observer;
+    private boolean terminated;
+
+    BodyObserver(Observer<? super R> observer) {
+      this.observer = observer;
+    }
+// BodyObserver实现了Observer的4个方法onSubscribe、onNext、onComplete、onError，
+// 但是不是BodyObserver自己完成的，而是通过传入的observer代替完成大部分功能，而BodyObserver
+// 只对传过来的Response进行简单判断就交给observer了
+    @Override public void onSubscribe(Disposable disposable) {
+      observer.onSubscribe(disposable);
+    }
+
+    @Override public void onNext(Response<R> response) {
+      if (response.isSuccessful()) {
+        // 比如判断response是否是成功从服务器返回的，然后交给observer的onNext方法，
+        // 此时传给observer的就是response的body了，对应我们使用的GsonConverterFactory，
+        // 那这个body就是WeatherEntity实例
+        observer.onNext(response.body());
+      } else {
+        terminated = true;
+        Throwable t = new HttpException(response);
+        try {
+          observer.onError(t);
+        } catch (Throwable inner) {
+          Exceptions.throwIfFatal(inner);
+          RxJavaPlugins.onError(new CompositeException(t, inner));
+        }
+      }
+    }
+
+    @Override public void onComplete() {
+      if (!terminated) {
+        observer.onComplete();
+      }
+    }
+
+    @Override public void onError(Throwable throwable) {
+      if (!terminated) {
+        observer.onError(throwable);
+      } else {
+        // This should never happen! onNext handles and forwards errors automatically.
+        Throwable broken = new AssertionError(
+            "This should never happen! Report as a bug with the full stacktrace.");
+        //noinspection UnnecessaryInitCause Two-arg AssertionError constructor is 1.7+ only.
+        broken.initCause(throwable);
+        RxJavaPlugins.onError(broken);
+      }
+    }
+  }
+}
+```
+
+创建完Observable后紧接着是subscribeOn、observeOn以及subscribe方法，很显然这些方法都是Observable的方法
+
+```java
+// Observable.java
+    @CheckReturnValue
+    @SchedulerSupport(SchedulerSupport.CUSTOM)
+    public final Observable<T> subscribeOn(Scheduler scheduler) {
+        ObjectHelper.requireNonNull(scheduler, "scheduler is null");
+        return RxJavaPlugins.onAssembly(new ObservableSubscribeOn<T>(this, scheduler));
+    }    
+```
+
+```java
+// Observable.java
+    @NonNull
+    public static <T> Observable<T> onAssembly(@NonNull Observable<T> source) {
+        // 一般来说onObservableAssembly在没有调用reset方法的情况下为空，所以这里肯定为空
+        Function<? super Observable, ? extends Observable> f = onObservableAssembly;
+        if (f != null) {
+            return apply(f, source);
+        }
+        // 也就是说这个onAssembly方法直接返回了source，所以上面的subscribeOn方法返回的是ObservableSubscribeOn
+        return source;
+    }
+```
+
+subscribeOn方法之后我们得到了一个新的ObservableSubscribeOn，它保存了BodyObservable以及加入的参数Schedulers.io()，接下来继续调用observeOn
+
+```java
+// Observable.java
+    @CheckReturnValue
+    @SchedulerSupport(SchedulerSupport.CUSTOM)
+    public final Observable<T> observeOn(Scheduler scheduler) {
+        return observeOn(scheduler, false, bufferSize());
+    }
+
+    @CheckReturnValue
+    @SchedulerSupport(SchedulerSupport.CUSTOM)
+    public final Observable<T> observeOn(Scheduler scheduler, boolean delayError, int bufferSize) {
+        ObjectHelper.requireNonNull(scheduler, "scheduler is null");
+        ObjectHelper.verifyPositive(bufferSize, "bufferSize");
+        // observeOn显然又返回了一个ObservableObserveOn
+        return RxJavaPlugins.onAssembly(new ObservableObserveOn<T>(this, scheduler, delayError, bufferSize));
+    }
+```
+
+observeOn方法之后我们得到了新的ObservableObserveOn，它保存了ObservableSubscribeOn以及参数AndroidSchedulers.mainThread()，最后调用subscribe方法
+
+```java
+// Observable.java
+    @CheckReturnValue
+    @SchedulerSupport(SchedulerSupport.NONE)
+    public final Disposable subscribe(Consumer<? super T> onNext, Consumer<? super Throwable> onError) {
+        // subscribe方法可以接受多种参数，比如我这里对应上面的两个Consumer参数，其中第一个Consumer名字是onNext，
+        // 第二个Consumer名字是onError，看到这里基本上明白了这两个Consumer的功能，就是执行处理onNext传入的数据以及处理
+        // onError传入的异常
+        return subscribe(onNext, onError, Functions.EMPTY_ACTION, Functions.emptyConsumer());
+    }
+
+    @CheckReturnValue
+    @SchedulerSupport(SchedulerSupport.NONE)
+    public final Disposable subscribe(Consumer<? super T> onNext, Consumer<? super Throwable> onError,
+            Action onComplete, Consumer<? super Disposable> onSubscribe) {
+        ObjectHelper.requireNonNull(onNext, "onNext is null");
+        ObjectHelper.requireNonNull(onError, "onError is null");
+        ObjectHelper.requireNonNull(onComplete, "onComplete is null");
+        ObjectHelper.requireNonNull(onSubscribe, "onSubscribe is null");
+        // 然后对onNext、onError、onComplete、onSubscribe四个Consumer进行封装，
+        // 整合成一个LambdaObserver，也就是说，本质上我们subscribe的参数最终还是Observer
+        LambdaObserver<T> ls = new LambdaObserver<T>(onNext, onError, onComplete, onSubscribe);
+
+        subscribe(ls);
+
+        return ls;
+    }
+
+    @SchedulerSupport(SchedulerSupport.NONE)
+    @Override
+    public final void subscribe(Observer<? super T> observer) {
+        ObjectHelper.requireNonNull(observer, "observer is null");
+        try {
+            // RxJavaPlugins.onSubscribe类似上面的onAssembly方法，这里没有做任何操作
+            // 等价于observer = observer
+            observer = RxJavaPlugins.onSubscribe(this, observer);
+
+            ObjectHelper.requireNonNull(observer, "The RxJavaPlugins.onSubscribe hook returned a null Observer. Please change the handler provided to RxJavaPlugins.setOnObservableSubscribe for invalid null returns. Further reading: https://github.com/ReactiveX/RxJava/wiki/Plugins");
+            // 然后调用subscribeActual，要知道ObservableObserveOn中重写了subscribeActual方法，所以我们再回到
+            // ObservableObserveOn中，需要记住的是这个observer保存了我们定义的两个Consumer
+            subscribeActual(observer);
+        } catch (NullPointerException e) { // NOPMD
+            throw e;
+        } catch (Throwable e) {
+            Exceptions.throwIfFatal(e);
+            // can't call onError because no way to know if a Disposable has been set or not
+            // can't call onSubscribe because the call might have set a Subscription already
+            RxJavaPlugins.onError(e);
+
+            NullPointerException npe = new NullPointerException("Actually not, but can't throw other exceptions due to RS");
+            npe.initCause(e);
+            throw npe;
+        }
+    }
+```
+
+```java
+// ObservableObserveOn.java
+    @Override
+    protected void subscribeActual(Observer<? super T> observer) {
+        // source就是ObservableObserveOn构造时传入的第一个参数，对应ObservableSubscribeOn，
+        // 由于scheduler对应AndroidSchedulers.mainThread()，本质上是HandlerScheduler
+        if (scheduler instanceof TrampolineScheduler) {
+            source.subscribe(observer);
+        } else {
+            // 调用的是HandlerScheduler的createWorker方法,返回的是HandlerWorker，
+            // HandlerWorker保存了两个参数，一个是Handler，另一个bool async，
+            // 因为AndroidSchedulers.mainThread()，所以此处的Handler是new Handler(Looper.getMainLooper())，
+            // 即主线程中的Handler，async为false
+            Scheduler.Worker w = scheduler.createWorker();
+            // 构造新的ObserveOnObserver，传入的参数有LambdaObserver和HandlerWorker
+            // 然后调用ObservableSubscribeOn的subscribe方法，这是一个递归调用，subscribe就是上面的，
+            // 又因为subscribeActual，所以还是调用ObservableSubscribeOn的subscribeActual方法
+            source.subscribe(new ObserveOnObserver<T>(observer, w, delayError, bufferSize));
+        }
+    }
+```
+
+```java
+// ObservableSubscribeOn.java
+    @Override
+    public void subscribeActual(final Observer<? super T> observer) {
+        // observer是上面构造的ObserveOnObserver，将其转换为SubscribeOnObserver
+        final SubscribeOnObserver<T> parent = new SubscribeOnObserver<T>(observer);
+        // 然后调用ObserveOnObserver的onSubscribe
+        observer.onSubscribe(parent);
+        // ObservableSubscribeOn的scheduler对应Schedulers.io()，即IoScheduler
+        // SubscribeTask会被放在BlockingQueue队列中
+        parent.setDisposable(scheduler.scheduleDirect(new SubscribeTask(parent)));
+    }
+
+    final class SubscribeTask implements Runnable {
+        private final SubscribeOnObserver<T> parent;
+
+        SubscribeTask(SubscribeOnObserver<T> parent) {
+            this.parent = parent;
+        }
+
+        @Override
+        public void run() {
+            source.subscribe(parent);
+        }
+    }    
+```
+
+```java
+// Scheduler.java
+    @NonNull
+    public Disposable scheduleDirect(@NonNull Runnable run) {
+        return scheduleDirect(run, 0L, TimeUnit.NANOSECONDS);
+    }
+
+    @NonNull
+    public Disposable scheduleDirect(@NonNull Runnable run, long delay, @NonNull TimeUnit unit) {
+        // 这个createWorker就是IoScheduler的createWorker，返回的是EventLoopWorker，此EventLoopWorker
+        // 运行的线程通过线程池CachedWorkerPool提供
+        final Worker w = createWorker();
+
+        final Runnable decoratedRun = RxJavaPlugins.onSchedule(run);
+
+        DisposeTask task = new DisposeTask(decoratedRun, w);
+        // w.schedule会在ScheduledThreadPoolExecutor中安排task被执行，task会被放在队列中
+        w.schedule(task, delay, unit);
+
+        return task;
+    }
+```
 
 
 
