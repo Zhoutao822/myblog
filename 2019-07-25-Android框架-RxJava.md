@@ -1342,11 +1342,14 @@ api.getNowWeather("beijing", KEY)
 
 虽然上面的代码只演示了RxJava的线程切换功能，但是实际上RxJava的功能非常强大，在处理大量数据的情况下能够更加简洁有效的代码完成，同时兼具数据变换的功能，这里三言两语很难表述清除，需要实战演练就能够明白，与此同时，基于RxJava我们也可以自定义更多的工具函数，以RxJava流式调用的方式来使用。
 
+**Observable警告：RxJava提供的各种方法比如subscribeOn、observeOn以及doOnNext等都会创建新的Observable和Observer，Observable是数据的被观察者，它保存了我们需要的数据；Observer是数据的观察者，数据如何发送、在哪个线程处理、如何处理异常等都是通过Observer处理的，一般来说每一个自定义的Observable都有一个内部类Observer，只是这个Observer是给上一级的Observable调用**
+
 首先我们需要知道`retrofit.create(Api.class)`创建了什么，这个在Retrofit框架分析中已经做过了，在这种情况下是通过RxJava2CallAdapterFactory的RxJava2CallAdapter调用adapt方法返回的Observable
 
 ```java
 // RxJava2CallAdapter.java
   @Override public Object adapt(Call<R> call) {
+    // 首先是创建CallExecuteObservable
     Observable<Response<R>> responseObservable = isAsync
         ? new CallEnqueueObservable<>(call)
         : new CallExecuteObservable<>(call);
@@ -1355,7 +1358,7 @@ api.getNowWeather("beijing", KEY)
     if (isResult) {
       observable = new ResultObservable<>(responseObservable);
     } else if (isBody) {
-      // 根据参数，返回的是BodyObservable
+      // 然后根据参数，返回的是BodyObservable
       observable = new BodyObservable<>(responseObservable);
     } else {
       observable = responseObservable;
@@ -1554,6 +1557,8 @@ observeOn方法之后我们得到了新的ObservableObserveOn，它保存了Obse
     }
 ```
 
+前面的构造Observable的顺序是：CallExecuteObservable -> BodyObservable -> ObservableSubscribeOn -> ObservableObserveOn，每一级Observable都是以上一级Observable作为参数够早的，CallExecuteObservable和BodyObservable是没有设置Scheduler参数的，ObservableSubscribeOn和ObservableObserveOn有Scheduler参数，Scheduler参数决定了Observer执行的线程；当我们调用subscribe方法会自底向上依次调用Observable的subscribeActual方法，在调用subscribeActual方法是会调用上一级的subscribe方法，传入的参数就是Observer，Observer的构造顺序是：自定义Consumer -> LambdaObserver -> ObserveOnObserver -> SubscribeOnObserver -> BodyObserver，最顶层的CallExecuteObservable是没有Observer的，每一级的Observer都会以下一级的Observer作为参数
+
 ```java
 // ObservableObserveOn.java
     @Override
@@ -1576,16 +1581,22 @@ observeOn方法之后我们得到了新的ObservableObserveOn，它保存了Obse
     }
 ```
 
+当我们走到了ObservableSubscribeOn的subscribeActual方法时，需要开始使用observer（上一级Observable的内部类Observer）进行预处理或者发送数据，因为RxJava的onSubscribe是最先被调用的，所以我们需要先调用onSubscribe方法，会依次向上调用Observer的onSubscribe方法，由于Observer保存了如何发送数据的方法onNext以及处理异常的方法onError以及表示已完成的onComplete，所以如果传到最上级的Observable，那么就可以在CallExecuteObservable的subscribeActual方法中调用传入的Observer的各种方法，从而对数据进行发送、处理等
+
 ```java
 // ObservableSubscribeOn.java
     @Override
     public void subscribeActual(final Observer<? super T> observer) {
         // observer是上面构造的ObserveOnObserver，将其转换为SubscribeOnObserver
+        // 将上一级传进来的订阅者包装为线程安全的原子变量
         final SubscribeOnObserver<T> parent = new SubscribeOnObserver<T>(observer);
-        // 然后调用ObserveOnObserver的onSubscribe
+        // 然后调用ObserveOnObserver的onSubscribe，调用onSubscribe即开始预处理，onSubscribe会调用
+        // 我们定义的Consumer（本示例未使用onSubscribe的Consumer，所以没有做任何操作）
         observer.onSubscribe(parent);
         // ObservableSubscribeOn的scheduler对应Schedulers.io()，即IoScheduler
-        // SubscribeTask会被放在BlockingQueue队列中
+        // SubscribeTask会被放在BlockingQueue队列中，这里就是开始执行我们实际请求的关键转折了，
+        // 之前都是铺垫，然后在指定的线程中执行source(上一级)的subscribe，即IO线程的工作
+        // source.subscribe(parent)，这里的source实际就是BodyObservable
         parent.setDisposable(scheduler.scheduleDirect(new SubscribeTask(parent)));
     }
 
@@ -1598,10 +1609,13 @@ observeOn方法之后我们得到了新的ObservableObserveOn，它保存了Obse
 
         @Override
         public void run() {
+            // 这里的source是BodyObservable
             source.subscribe(parent);
         }
     }    
 ```
+
+scheduler的作用就是通过内部Worker将task交给线程池进行处理，因为ObservableSubscribeOn是通过调用subscribeOn方法生成的，因此很大程度上会运行在其他线程，也就是说SubscribeTask的run方法是执行在Worker的线程池中，即从现在开始的subscribe都是在Worker线程中而不是主线程了
 
 ```java
 // Scheduler.java
@@ -1625,6 +1639,302 @@ observeOn方法之后我们得到了新的ObservableObserveOn，它保存了Obse
         return task;
     }
 ```
+
+在看BodyObservable的subscribe方法前先看一下onSubscribe做了些什么
+
+```java
+// ObservableObserveOn.java 内部类ObserveOnObserver的onSubscribe方法
+        @Override
+        public void onSubscribe(Disposable d) {
+            if (DisposableHelper.validate(this.upstream, d)) {
+                this.upstream = d;
+                // 这里的d是SubscribeOnObserver，所以跳过
+                if (d instanceof QueueDisposable) {
+                    @SuppressWarnings("unchecked")
+                    QueueDisposable<T> qd = (QueueDisposable<T>) d;
+
+                    int m = qd.requestFusion(QueueDisposable.ANY | QueueDisposable.BOUNDARY);
+
+                    if (m == QueueDisposable.SYNC) {
+                        sourceMode = m;
+                        queue = qd;
+                        done = true;
+                        downstream.onSubscribe(this);
+                        schedule();
+                        return;
+                    }
+                    if (m == QueueDisposable.ASYNC) {
+                        sourceMode = m;
+                        queue = qd;
+                        downstream.onSubscribe(this);
+                        return;
+                    }
+                }
+                // 这个队列用于保存数据，之后会用，bufferSize大小默认是128
+                queue = new SpscLinkedArrayQueue<T>(bufferSize);
+                // 而downstream是ObserveOnObserver构造函数的第一个参数，即我们调用subscribe方法时
+                // 传入的LambdaObserver（但是通过Consumer实现的）
+                downstream.onSubscribe(this);
+            }
+        }
+```
+
+```java
+// LambdaObserver.java
+    @Override
+    public void onSubscribe(Disposable d) {
+        if (DisposableHelper.setOnce(this, d)) {
+            try {
+                // onSubscribe也只是调用onSubscribe.accept，还记得上面我们的LambdaObserver构造时仅使用了
+                // onNext和onError，所以onSubscribe其实是空的，这里没有任何作用
+                onSubscribe.accept(this);
+            } catch (Throwable ex) {
+                Exceptions.throwIfFatal(ex);
+                d.dispose();
+                onError(ex);
+            }
+        }
+    }
+```
+
+回到subscribe的调用链，在子线程（线程池）
+
+```java
+// BodyObservable.java
+  @Override protected void subscribeActual(Observer<? super T> observer) {
+    // 这里的upstream是CallExecuteObservable
+    upstream.subscribe(new BodyObserver<T>(observer));
+  }
+```
+
+通过subscribe最终调用到了最顶层的Observable的subscribeActual方法，且传入的下一级的内部类Observer，用于提供onXXX方法传递数据，执行在子线程（线程池）
+
+```java
+// CallExecuteObservable.java
+  @Override protected void subscribeActual(Observer<? super Response<T>> observer) {
+    // Since Call is a one-shot type, clone it for each new observer.
+    Call<T> call = originalCall.clone();
+    CallDisposable disposable = new CallDisposable(call);
+    // CallExecuteObservable是我们实际开始调用Retrofit请求数据的开始
+    // 首先需要调用observer的onSubscribe，这里是BodyObserver，
+    // 还记得上面我们回溯的LambdaObserver的onSubscribe，
+    // 这里其实什么事情都没有做
+    observer.onSubscribe(disposable);
+    if (disposable.isDisposed()) {
+      return;
+    }
+
+    boolean terminated = false;
+    try {
+      // 然后调用call.execute()，如果记得Retrofit，那么就知道这里发出了请求，也就是说这个方法执行在IO线程
+      Response<T> response = call.execute();
+      if (!disposable.isDisposed()) {
+        // 然后通过onNext方法将结果发射出去，这个observer就是BodyObserver
+        observer.onNext(response);
+      }
+      if (!disposable.isDisposed()) {
+        terminated = true;
+        observer.onComplete();
+      }
+    } catch (Throwable t) {
+      Exceptions.throwIfFatal(t);
+      if (terminated) {
+        RxJavaPlugins.onError(t);
+      } else if (!disposable.isDisposed()) {
+        try {
+          observer.onError(t);
+        } catch (Throwable inner) {
+          Exceptions.throwIfFatal(inner);
+          RxJavaPlugins.onError(new CompositeException(t, inner));
+        }
+      }
+    }
+  }
+```
+
+onNext方法的向下一级传递
+
+```java
+// BodyObservable.java 内部类BodyObserver的onNext方法
+    @Override public void onNext(Response<R> response) {
+      if (response.isSuccessful()) {
+        // BodyObserver判断了一下请求结果response，然后将body发射出去
+        // 这里的observer就是SubscribeOnObserver
+        observer.onNext(response.body());
+      } else {
+        terminated = true;
+        Throwable t = new HttpException(response);
+        try {
+          observer.onError(t);
+        } catch (Throwable inner) {
+          Exceptions.throwIfFatal(inner);
+          RxJavaPlugins.onError(new CompositeException(t, inner));
+        }
+      }
+    }
+```
+
+```java
+// ObservableSubscribeOn.java 内部类SubscribeOnObserver
+        @Override
+        public void onNext(T t) {
+            // 这里的downstream是ObserveOnObserver
+            downstream.onNext(t);
+        }
+```
+
+这里因为ObservableObserveOn是通过observeOn创建的，而这里发生了线程切换，我们的例子中是主线程，所以需要通过Handler将后续的任务切换到主线程中
+
+```java
+// ObservableObserveOn.java 内部类ObserveOnObserver
+        @Override
+        public void onNext(T t) {
+            if (done) {
+                return;
+            }
+
+            if (sourceMode != QueueDisposable.ASYNC) {
+                // 这里的queue是SpscLinkedArrayQueue，我们把传出来的数据保存在队列中了
+                queue.offer(t);
+            }
+            // 最终调用schedule
+            schedule();
+        }
+
+        void schedule() {
+            if (getAndIncrement() == 0) {
+                // worker是初始化时调用observeOn传入的主线程的HandlerScheduler的内部类HandlerWorker，
+                // 这里的schedule方法传入this，即ObserveOnObserver，与此同时ObserveOnObserver
+                // 实现了Runnable的接口，可以作为Runnable，它的run方法会在下面被执行
+                worker.schedule(this);
+            }
+        }        
+```
+
+```java
+// HandlerScheduler.java 内部类HandlerWorker
+        @Override
+        @SuppressLint("NewApi") // Async will only be true when the API is available to call.
+        public Disposable schedule(Runnable run, long delay, TimeUnit unit) {
+            if (run == null) throw new NullPointerException("run == null");
+            if (unit == null) throw new NullPointerException("unit == null");
+
+            if (disposed) {
+                return Disposables.disposed();
+            }
+
+            run = RxJavaPlugins.onSchedule(run);
+            // HandlerWorker的schedule方法，我们传入的run即上面的ObserveOnObserver
+            // ScheduledRunnable也是Runnable，但是它的run方法仅仅是调用了传入的run的run方法
+            // 也就是说如果我们执行了scheduled的run方法等价于执行了run的方法，也就是
+            // ObserveOnObserver的run方法
+            ScheduledRunnable scheduled = new ScheduledRunnable(handler, run);
+            // scheduled的run方法执行是通过handler处理的，通过sendMessageDelayed实现的
+            Message message = Message.obtain(handler, scheduled);
+            message.obj = this; // Used as token for batch disposal of this worker's runnables.
+
+            if (async) {
+                message.setAsynchronous(true);
+            }
+            // 也就是在这里我们将在主线程执行ObserveOnObserver的run方法
+            handler.sendMessageDelayed(message, unit.toMillis(delay));
+
+            // Re-check disposed state for removing in case we were racing a call to dispose().
+            if (disposed) {
+                handler.removeCallbacks(scheduled);
+                return Disposables.disposed();
+            }
+
+            return scheduled;
+        }
+```
+
+```java
+// ObservableObserveOn.java 内部类ObserveOnObserver
+        @Override
+        public void run() {
+            if (outputFused) {
+                drainFused();
+            } else {
+                // 这里执行的是drainNormal
+                drainNormal();
+            }
+        }
+
+        void drainNormal() {
+            int missed = 1;
+            // 还记得上面的SpscLinkedArrayQueue，之前我们在onNext方法中把传过来的数据保存在队列中
+            // 接下来需要从队列中取出数据
+            final SimpleQueue<T> q = queue;
+            // downstream即LambdaObserver
+            final Observer<? super T> a = downstream;
+            // 这里用循环是因为RxJava支持连续发送多个数据，那么最终数据都保存在队列中
+            // 所以取数据的时候就可以通过循环来一次性获取队列中的所有数据，而SpscLinkedArrayQueue
+            // 的最大容量，根据之前的代码我们知道是128
+            for (;;) {
+                if (checkTerminated(done, q.isEmpty(), a)) {
+                    return;
+                }
+
+                for (;;) {
+                    boolean d = done;
+                    T v;
+
+                    try {
+                        // q.poll从队列中取出数据
+                        v = q.poll();
+                    } catch (Throwable ex) {
+                        Exceptions.throwIfFatal(ex);
+                        disposed = true;
+                        upstream.dispose();
+                        q.clear();
+                        a.onError(ex);
+                        worker.dispose();
+                        return;
+                    }
+                    boolean empty = v == null;
+
+                    if (checkTerminated(d, empty, a)) {
+                        return;
+                    }
+
+                    if (empty) {
+                        break;
+                    }
+                    // a即为LambdaObserver，v为我们从队列中取出来的数据，也是
+                    // 我们通过handler传入的数据，通过onNext发出，而这个onNext
+                    // 就是我们定义的第一个Consumer，通过这个Consumer的accept方法
+                    // 在主线程实现TextView的设置
+                    a.onNext(v);
+                }
+
+                missed = addAndGet(-missed);
+                if (missed == 0) {
+                    break;
+                }
+            }
+        }
+```
+
+```java
+// LambdaObserver.java
+    @Override
+    public void onNext(T t) {
+        if (!isDisposed()) {
+            try {
+                // 我们定义的Consumer的accept方法
+                onNext.accept(t);
+            } catch (Throwable e) {
+                Exceptions.throwIfFatal(e);
+                get().dispose();
+                onError(e);
+            }
+        }
+    }
+```
+
+综上，RxJava的简单源码分析流程就完成了
+
 
 
 
