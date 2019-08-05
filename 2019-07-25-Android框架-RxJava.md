@@ -21,6 +21,7 @@ tags:
 > [EventBus使用详解](https://juejin.im/post/5a6c36fff265da3e2f012f82)
 > [Rxjava这一篇就够了，墙裂推荐](https://juejin.im/post/5a224cc76fb9a04527256683)
 > [精彩的RxJava源码剖析](http://www.10tiao.com/html/227/201802/2650242399/1.html)
+> [给 Android 开发者的 RxJava 详解](http://gank.io/post/560e15be2dca930e00da1083)
 
 Android中很多地方都需要跨线程通信，这是由于Android主线程不允许进行复杂的网络请求或者其他非常耗时的操作，否则会导致ANR，主线程只能进行UI操作，比如修改某个控件的text、设置某个控件不可见等等，因此网络请求等操作需要在其他线程中完成，当数据在其他线程中获取完毕时，通过跨线程通信将数据传到主线程中，主线程就可以直接根据数据进行UI操作。常见的跨线程通信的方式有Handler、AsyncTask、EventBus以及RxJava等，前两个是Android自带，后两者是封装好的第三方库。
 
@@ -1717,7 +1718,7 @@ scheduler的作用就是通过内部Worker将task交给线程池进行处理，�
     CallDisposable disposable = new CallDisposable(call);
     // CallExecuteObservable是我们实际开始调用Retrofit请求数据的开始
     // 首先需要调用observer的onSubscribe，这里是BodyObserver，
-    // 还记得上面我们回溯的LambdaObserver的onSubscribe，
+    // 还记得上面的LambdaObserver的onSubscribe，
     // 这里其实什么事情都没有做
     observer.onSubscribe(disposable);
     if (disposable.isDisposed()) {
@@ -1933,7 +1934,17 @@ onNext方法的向下一级传递
     }
 ```
 
-综上，RxJava的简单源码分析流程就完成了
+综上，RxJava的简单源码分析流程就完成了，整个RxJava调用流程可以分为两个阶段：构造阶段和subscribe阶段，在调用subscribe方法前的步骤我称之为构造阶段，这个过程中主要工作是创建被观察者Observable，每一次使用RxJava的方法时都会创建新的Observable，每个新的Observable都会以上一级的Observable作为参数，其中部分Observable还需要Scheduler参数，用于切换线程，构造阶段仅仅是将Observable连接起来；在调用subscribe方法时开始了subscribe阶段，这个阶段的任务是将我们自定义的Consumer（或者可以当作观察者Observer）通过Observable的subscribe方法连接起来（subscribe的过程中可能会调用onSubscribe方法进行预处理，初始化一些队列什么的，onSubscribe方法与onNext、onError、onComplete方法有点区别），当我们的subscribe方法走到最顶层时会开始启动Observer的onXXX方法传递数据或者传出异常等等，因为之前已经将Observer连接起来，所以此时onXXX方法的调用也是链式的，层层向下传递，直到调用我们自定义的Consumer（在此过程中会通过在构造阶段传入的Scheduler实现线程切换）。
+
+如果完整的看过一遍分析流程就会发现其实Observable和Observer的调用链是很简单的，但是随之也有几个疑问：
+
+> 1.为什么要用Observable和Observer的形式？
+
+首先需要明白的是，RxJava的目的是提供一个便于进行数据处理的框架，通过流式调用实现线程切换、数据类型转换等，也就是说数据从A -> B -> C可以是不同类型的数据或者是在不同线程处理，最适合的模式就是观察者模式，比如我们常见的OnClickListener，它传递的是点击事件，再比如我们自定义的传递数据的接口回调，都是观察者模式。简而言之就是，A通过B提供的接口将数据传到B中进行处理，B通过C提供的接口将数传到C中进行处理，由此可以进行数据的传递，当然这只是数据传递的流程，具体的调用流程就是上面的总结。使用Observable和Observer的形式，一是便于我们自定义数据转换的Observable和Observer，二是可以实现流式调用，三是这里面实现了这种接口回调的功能。
+
+> 2.subscribeOn和observeOn是如何切换线程的？
+
+subscribeOn会指定我们在调用subscribeOn之前的Observable中数据处理的线程，observeOn会指定我们在调用observeOn之后的Observable中数据处理的线程。这是因为两者切换线程的位置不同，subscribeOn会在subscribeActual的方法中切换线程，导致后续所有的调用都是在subscribeOn指定的线程中，而subscribeActual方法是自底向上调用的，因此会影响subscribeOn之前的所有方法；而observeOn是在ObserveOnObserver的onNext方法中进行线程切换的，因此会影响observeOn后面数据传递的方法。
 
 
 
