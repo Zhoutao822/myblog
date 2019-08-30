@@ -40,7 +40,7 @@ def main(_):
   # the forward inference and back-propagation.
     with tf.name_scope('inputs'):
         with tf.device('/cpu:0'):
-            images_train, labels_train, images_test, labels_test = networks.load_mnist()
+            images_train, labels_train = networks.load_mnist()
             print(images_train.shape, labels_train.shape)
 
   # Define the GANModel tuple. Optionally, condition the GAN on the label or
@@ -52,7 +52,7 @@ def main(_):
         real_data=images_train,
         generator_inputs=(noise, labels_train))
 
-    tfgan.eval.add_gan_model_image_summaries(gan_model, FLAGS.grid_size)
+    # tfgan.eval.add_gan_model_image_summaries(gan_model, FLAGS.grid_size)
 
     # Get the GANLoss tuple. You can pass a custom function, use one of the
     # already-implemented losses from the losses library, or use the defaults.
