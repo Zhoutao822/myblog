@@ -232,7 +232,9 @@ public void onClick(View v) {
 
 这样就完成了服务器与客户端的对话。
 
-## 2. 
+## 2. AIDL
+
+
 
 ## 3. 
 
