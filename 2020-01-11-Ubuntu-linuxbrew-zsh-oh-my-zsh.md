@@ -22,11 +22,11 @@ tags:
 
 ## 1. 为什么需要标题中的工具
 
-首先你需要一个云服务器，可以是华为云、腾讯云、阿里云等等，注册购买即可，最便宜的1核心加2GB内存加40GB/50GB的硬盘存储基本足够前期的学习使用，你可以先租1个月玩玩，如果有学生优惠基本上一个月只要10元。云服务器的操作系统一般有Windows Server、CentOS以及Ubuntu等等，我最常用的是Ubuntu而且出了问题能够最容易找到解决方法，稳定性什么的以后再说。Ubuntu版本可以直接上18.04，不用考虑旧版本16.04。
+首先你需要一个云服务器，可以是华为云、腾讯云、阿里云等等，注册购买即可，最便宜的1核心CPU加2GB内存加40GB/50GB的硬盘存储基本足够前期的学习使用，你可以先租1个月玩玩，如果有学生优惠基本上一个月只要10元。云服务器的操作系统一般有Windows Server、CentOS以及Ubuntu等等，我最常用的是Ubuntu而且出了问题能够最容易找到解决方法，稳定性什么的以后再说。Ubuntu版本可以直接上18.04，不用考虑旧版本16.04。
 
-得到服务器后我会先安装Linuxbrew，这是一个包管理工具，是从Homebrew演变而来（Homebrew只能在macOS上使用），在服务器上安装了brew之后，后续需要安装的软件就都可以通过brew安装，如果brew仓库没有再考虑自行安装。使用brew最明显的好处是你可以直接通过brew更新、删除、查看所安装的软件，而且brew可以提供快速开启某些服务的命令，比如MySQL、Redis、Tomcat等等。
+得到服务器后我会先安装zsh，zsh就是命令行工具，我们在服务器上输入的指令都通过zsh执行，zsh搭配oh-my-zsh可以实现非常舒适的UI效果并且提供一些很有用的插件，比如自动提示命令等等。
 
-然后通过brew安装zsh，zsh就是命令行工具，我们在服务器上输入的指令都通过zsh执行，zsh搭配oh-my-zsh可以实现非常舒适的UI效果并且提供一些很有用的插件，比如自动补全命令等等。
+然后安装Linuxbrew，这是一个包管理工具，是从Homebrew迁移而来（Homebrew只能在macOS上使用），在服务器上安装了brew之后，后续需要安装的软件就都可以通过brew安装，如果brew仓库没有再考虑自行安装。使用brew最明显的好处是你可以直接通过brew更新、删除、查看所安装的软件，而且brew可以提供快速开启某些服务的命令，比如MySQL、Redis、Tomcat等等。
 
 ## 2. Ubuntu服务器配置
 
@@ -81,7 +81,7 @@ LC_ALL=en_US.UTF-8
 本机输入指令`ssh-keygen -t rsa`，然后你就可以在`/home/usera/.ssh/id_rsa.pub`中查看生成的密钥，注意这个目录是在指令执行了输出结果里出现的，不是所有人都一样
 
 ```shell
-[usera@serverA ~]$ ssh-keygen -t rsa
+[usera@local ~]$ ssh-keygen -t rsa
 Generating public/private rsa key pair.
 Enter file in which to save the key (/home/usera/.ssh/id_rsa): 
 Created directory '/home/usera/.ssh'.
@@ -90,7 +90,7 @@ Enter same passphrase again:
 Your identification has been saved in /home/usera/.ssh/id_rsa.
 Your public key has been saved in /home/usera/.ssh/id_rsa.pub.
 The key fingerprint is:
-39:f2:fc:70:ef:e9:bd:05:40:6e:64:b0:99:56:6e:01 usera@serverA
+39:f2:fc:70:ef:e9:bd:05:40:6e:64:b0:99:56:6e:01 usera@local
 The key's randomart image is:
 +--[ RSA 2048]----+
 |          Eo*    |
@@ -108,9 +108,8 @@ The key's randomart image is:
 我们需要的是`id_rsa.pub`的内容，以`ssh-rsa`开头的文本，将`id_rsa.pub`的内容复制一份放到服务器的根目录的`.ssh/authorized_keys`文件中，如果没有`.ssh`目录及`authorized_keys`文件，那就创建一份，之后ssh就不需要密码了。
 
 ```pub
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDG79mJLYz80Q+kh7MNUH4uLc/sBRyJPQqjOoSEA/co2LzlAEQ+gEjrxcLoKySsGchi/zALeo9aTaNZSn8nNwaIcg/S+yxZeB6XuqJhjWxQGOonRbAPPcnOldxk/S0J4WS+cFbp0gCmBuu17fjaQ4ODRz88vqhx0LBZvqlUFiUfT7+N9YX4AKQfJVBG5MuOq6CSowm37ArgxfKoh5U0W2pZhDDdeHeriK5oPu/D8ZN36RVMQ/kxUnuA+Kpv35MjboAjPsT6sa+RnsT/Ftg/ZQXOMV/Tz7UQa7vOERjFoTzMidHhwztZuOw/cTNpDozextbPGBxoWb7rpA0sMNLNoPAX XXXXXXXXXXX
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDG79mJLYz80Q+kh7MNUH4uLc/sBRyJPQqjOoSEA/co2XXXXXXXXjrxcLoKySsGchi/zALeo9aTaNZSn8nNwaIcg/S+yxZeB6XuqJhjWxQGOonRbAPPcnOldxk/S0J4WS+cFbp0gCmBuu17fjaQXXXXXXXXXXXXXXXXXXXXXXXXXX+N9YXXXXXXXXXXXXXXXXm37ArgxfKoh5U0W2pZhDDdeHeriK5oPu/D8ZN36RVMQ/kxUnuA+Kpv35MjboAjPsT6sa+RnsT/Ftg/ZQXOMV/Tz7UQa7vOERjFoTzMidHhwztZuOw/cTNpDozextbPGBxoWb7rpA0sMNLNoPAX XXXXXXXXXXX
 ```
-
 
 ## 3. zsh&oh-my-zsh安装
 
@@ -193,6 +192,7 @@ The code added to ~/.zshrc is marked by the lines
 You should not edit anything between these lines if you intend to
 run zsh-newuser-install again.  You may, however, edit any other part
 of the file.
+# 此时你的用户名会改变，且UI有变化
 VM-0-9-ubuntu% 
 ```
 
@@ -522,6 +522,8 @@ plugins=(
 
 ## 4. Linuxbrew安装
 
+**注意先安装zsh再安装linuxbrew，否则可能出现brew无法在zsh中使用**
+
 ### 4.1 创建非root用户（可选）
 
 安装Linuxbrew参考官网不一定有效，因为Linuxbrew不能在root用户下安装，所以你如果之前登陆的是root用户需要创建一个新的非root用户，通过以下几个指令
@@ -560,7 +562,7 @@ sudo chmod -w /etc/sudoers
 su - your_user
 ```
 
-### 3.2 Linuxbrew
+### 4.2 Linuxbrew
 
 如果已经是非root用户则可以跳过以上创建新用户步骤。
 
@@ -1045,7 +1047,7 @@ puts "    #{Tty.underline}https://docs.brew.sh#{Tty.reset}"
 warn "#{HOMEBREW_PREFIX}/bin is not in your PATH." unless ENV["PATH"].split(":").include? "#{HOMEBREW_PREFIX}/bin"
 ```
 
-安装成功结果如下，这里需要按照提示执行`sudo apt-get install build-essential`、`echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.profile`、`eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)`、`brew install gcc`，就可以正常使用brew了，最后一步安装gcc可能会非常耗时。
+安装成功结果如下，这里需要按照提示执行`sudo apt-get install build-essential`、`echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.zprofile`、`eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)`、`brew install gcc`，就可以正常使用brew了，最后一步安装gcc可能会非常耗时。
 
 ```shell
 ==> Installation successful!
@@ -1063,25 +1065,16 @@ Read the analytics documentation (and how to opt-out) here:
   Fedora, Red Hat, CentOS, etc.
     sudo yum groupinstall 'Development Tools'
   See https://docs.brew.sh/linux for more information.
-- Configure Homebrew in your ~/.profile by running
-    echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.profile
+- Configure Homebrew in your ~/.zprofile by running
+    echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.zprofile
 - Add Homebrew to your PATH
     eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)
 - We recommend that you install GCC by running:
     brew install gcc
 - Run `brew help` to get started
-- Further documentation:
+- Further documentation: 
     https://docs.brew.sh
 Warning: /home/linuxbrew/.linuxbrew/bin is not in your PATH.
-```
-
-最后需要将brew添加到路径中，ubuntu添加到`~/.profile`中，最后记得`source ~/.profile`
-
-```shell
-test -d ~/.linuxbrew && eval $(~/.linuxbrew/bin/brew shellenv)
-test -d /home/linuxbrew/.linuxbrew && eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)
-test -r ~/.bash_profile && echo "eval \$($(brew --prefix)/bin/brew shellenv)" >>~/.bash_profile
-echo "eval \$($(brew --prefix)/bin/brew shellenv)" >>~/.profile
 ```
 
 若brew正确安装，则可以通过`brew -v`查看brew版本信息
@@ -1090,3 +1083,11 @@ echo "eval \$($(brew --prefix)/bin/brew shellenv)" >>~/.profile
 Homebrew 2.2.2
 Homebrew/linuxbrew-core (git revision 906b; last commit 2020-01-11)
 ```
+
+### 4.3 腾讯云下载问题
+
+在安装linuxbrew时，我发现腾讯云服务器在下载`portable-ruby-2.6.3.x86_64_linux.bottle.tar.gz`这个包的时候速度非常慢并且导致超时，结果brew安装失败，如果失败了可以先将linuxbrew删除（执行`sudo rm -rf /home/linuxbrew`，具体看你的linuxbrew安装目录），再通过其他方式预先把`portable-ruby-2.6.3.x86_64_linux.bottle.tar.gz`下载下来并且放到`~/.cache/Homebrew/`目录下，这样重新安装linuxbrew时就会直接从`.cache`中解压安装了。
+
+
+
+
