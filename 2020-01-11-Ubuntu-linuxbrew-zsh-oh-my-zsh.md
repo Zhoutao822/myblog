@@ -1047,7 +1047,7 @@ puts "    #{Tty.underline}https://docs.brew.sh#{Tty.reset}"
 warn "#{HOMEBREW_PREFIX}/bin is not in your PATH." unless ENV["PATH"].split(":").include? "#{HOMEBREW_PREFIX}/bin"
 ```
 
-安装成功结果如下，这里需要按照提示执行`sudo apt-get install build-essential`、`echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.zprofile`、`eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)`、`brew install gcc`，就可以正常使用brew了，最后一步安装gcc可能会非常耗时。
+安装成功结果如下，这里需要按照提示执行`sudo apt-get install build-essential`、`echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.zprofile`、`eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)`、`brew install gcc`，就可以正常使用brew了，最后一步安装gcc可能会非常耗时（腾讯云网络速度非常奇葩，有时快有时慢，最后从源码编译gcc花了两个小时）。
 
 ```shell
 ==> Installation successful!
@@ -1086,8 +1086,42 @@ Homebrew/linuxbrew-core (git revision 906b; last commit 2020-01-11)
 
 ### 4.3 腾讯云下载问题
 
-在安装linuxbrew时，我发现腾讯云服务器在下载`portable-ruby-2.6.3.x86_64_linux.bottle.tar.gz`这个包的时候速度非常慢并且导致超时，结果brew安装失败，如果失败了可以先将linuxbrew删除（执行`sudo rm -rf /home/linuxbrew`，具体看你的linuxbrew安装目录），再通过其他方式预先把`portable-ruby-2.6.3.x86_64_linux.bottle.tar.gz`下载下来并且放到`~/.cache/Homebrew/`目录下，这样重新安装linuxbrew时就会直接从`.cache`中解压安装了。
+在安装linuxbrew时，我发现腾讯云服务器在下载[`portable-ruby-2.6.3.x86_64_linux.bottle.tar.gz`](https://linuxbrew.bintray.com/bottles-portable-ruby/portable-ruby-2.6.3.x86_64_linux.bottle.tar.gz)这个包的时候速度非常慢并且导致超时（华为云没有问题），结果brew安装失败，如果失败了可以先将linuxbrew删除（执行`sudo rm -rf /home/linuxbrew`，具体看你的linuxbrew安装目录），再通过其他方式预先把`portable-ruby-2.6.3.x86_64_linux.bottle.tar.gz`下载下来并且放到`~/.cache/Homebrew/`目录下，这样重新安装linuxbrew时就会直接从`.cache`中解压安装了。
 
+### 4.4 brew更换源（**Ubuntu不要使用，macOS可以使用**）
 
+brew下载某些软件时会因为网络原因非常慢，甚至导致安装失败的问题，所以可以使用国内源，比如[清华大学开源软件镜像站](https://mirror.tuna.tsinghua.edu.cn/help/homebrew/)以及[中科大镜像源](https://lug.ustc.edu.cn/wiki/mirrors/help/brew.git)，可以更换4个位置的源，分别是`brew/homebrew-core/homebrew-cask/homebrew-bottles`，前三个可以修改本地仓库的信息，最后一个需要修改`.zshrc`。
+
+```shell
+# brew自己的仓库
+git -C "$(brew --repo)" remote set-url origin https://mirrors.ustc.edu.cn/brew.git
+# brew可以安装的软件名称的仓库
+git -C "$(brew --repo homebrew/core)" remote set-url origin https://mirrors.ustc.edu.cn/homebrew-core.git
+# brew可以安装的GUI软件的仓库，如果提示没有cask，可以先执行brew cask
+git -C "$(brew --repo homebrew/cask)" remote set-url origin https://mirrors.ustc.edu.cn/homebrew-cask.git
+
+# 更新brew自己
+brew update
+
+# 更新brew安装的软件
+brew upgrade
+
+# 清楚无效连接以及本地下载的安装文件缓存
+brew cleanup
+```
+
+```shell
+# brew可以安装的软件的仓库
+echo 'export HOMEBREW_BOTTLE_DOMAIN=https://mirrors.ustc.edu.cn/homebrew-bottles' >> ~/.zshrc
+source ~/.zshrc
+```
+
+### 4.5 卸载linuxbrew
+
+执行以下命令，同理如果出现443问题，翻墙查看并保存，然后直接运行
+
+```shell
+ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Linuxbrew/install/master/uninstall)"
+```
 
 
