@@ -1,6 +1,7 @@
 ---
 title: brew+MySQL+DataGrip
 date: 2020-01-11 21:31:50
+category:
 - Tips
 tags:
 - Ubuntu
