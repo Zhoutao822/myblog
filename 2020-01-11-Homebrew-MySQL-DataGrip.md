@@ -29,7 +29,7 @@ mysql++                       mysql-connector-c++@1.1       mysql@5.7
 mysql-client                  mysql-sandbox                 mysqltuner
 ```
 
-可以发现是没问题的，所以执行`brew install mysql`，这里不指定版本号即默认安装最新版。在此过程中会自动安装MySQL的依赖库，默认情况下这些依赖库是只能被brew安装的软件使用的，如果你需要从其他位置使用brew提供的依赖库需要手动export这些库的路径到`.zshrc`中（不export也是可以的），安装完成后显示以下内容
+可以发现是没问题的，所以执行`brew install mysql`（如果brew安装很慢，则使用`sudo apt install mysql-server`安装），这里不指定版本号即默认安装最新版。在此过程中会自动安装MySQL的依赖库，默认情况下这些依赖库是只能被brew安装的软件使用的，如果你需要从其他位置使用brew提供的依赖库需要手动export这些库的路径到`.zshrc`中（不export也是可以的），安装完成后显示以下内容
 
 ```shell
 ==> mysql
