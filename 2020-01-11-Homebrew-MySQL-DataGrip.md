@@ -17,6 +17,10 @@ tags:
 
 > [DataGrip](https://www.jetbrains.com/datagrip/)
 
+MySQL 是最流行的关系型数据库管理系统。
+
+<!-- more -->
+
 ## 1. brew安装MySQL
 
 brew安装软件之前可以先执行`brew search XXX`查看brew仓库是否存在此软件，在安装MySQL之前我们先搜索一下
