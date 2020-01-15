@@ -63,7 +63,13 @@ echo "------Reboot------"
 sudo reboot
 ```
 
-然后再说明一下脚本里都干了些什么，首先`sudo apt-get install language-pack-zh-hans -y`安装中文支持包，然后`sudo sed -i '$aLANG=zh_CN.UTF-8\nLANGUAGE=zh_CN:zh:en_US:en\nLC_CTYPE="en_US.UTF-8"\nLC_ALL=en_US.UTF-8' /etc/environment`，在`/etc/environment`末尾添加以下几行配置，这个是永久设置环境变量
+然后再说明一下脚本里都干了些什么，首先`sudo apt-get install language-pack-zh-hans -y`安装中文支持包，然后执行
+
+```shell
+sudo sed -i '$aLANG=zh_CN.UTF-8\nLANGUAGE=zh_CN:zh:en_US:en\nLC_CTYPE="en_US.UTF-8"\nLC_ALL=en_US.UTF-8 /etc/environment
+```
+
+在`/etc/environment`末尾添加以下几行配置，这个是永久设置环境变量
 
 ```sh
 LANG=zh_CN.UTF-8
@@ -572,7 +578,13 @@ su - your_user
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/Linuxbrew/install/master/install.sh)"
 ```
 
-如果出现443错误`Failed to connect to raw.githubusercontent.com port 443: Operation timed out`，则直接将以下内容保存为`brew_install.rb`，然后执行`ruby brew_install.rb`即可，如果系统没有ruby，则执行`sudo apt install ruby`，以下内容来自于`https://raw.githubusercontent.com/Linuxbrew/install/master/install`，如有更新，请翻墙访问
+如果出现443错误`Failed to connect to raw.githubusercontent.com port 443: Operation timed out`，则直接将以下内容保存为`brew_install.rb`，然后执行`ruby brew_install.rb`即可，如果系统没有ruby，则执行
+
+```shell
+sudo apt install ruby
+```
+
+以下内容来自于`https://raw.githubusercontent.com/Linuxbrew/install/master/install`，如有更新，请翻墙访问
 
 ```ruby
 #!/usr/bin/env ruby
@@ -1047,7 +1059,19 @@ puts "    #{Tty.underline}https://docs.brew.sh#{Tty.reset}"
 warn "#{HOMEBREW_PREFIX}/bin is not in your PATH." unless ENV["PATH"].split(":").include? "#{HOMEBREW_PREFIX}/bin"
 ```
 
-安装成功结果如下，这里需要按照提示执行`sudo apt-get install build-essential`、`echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.zprofile`、`eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)`、`brew install gcc`，就可以正常使用brew了，最后一步安装gcc可能会非常耗时（腾讯云网络速度非常奇葩，有时快有时慢，最后从源码编译gcc花了两个小时）。
+安装成功结果如下，这里需要按照提示依次执行
+
+```shell
+sudo apt-get install build-essential
+
+echo 'eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)' >>~/.zprofile
+
+eval $(/home/linuxbrew/.linuxbrew/bin/brew shellenv)
+
+brew install gcc
+```
+
+就可以正常使用brew了，最后一步安装gcc可能会非常耗时（腾讯云网络速度非常奇葩，有时快有时慢，最后从源码编译gcc花了两个小时）。
 
 ```shell
 ==> Installation successful!
